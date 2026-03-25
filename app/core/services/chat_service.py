@@ -25,29 +25,19 @@ class ParsedResponse(BaseModel):
     result: Any
 
 class ChatService:
-    chats: Dict[str, List[Message]] = {}
-
     def __init__(self, model: ChatOllama, tools: List[Callable[..., Any]], search_service=None):
         self._agent_executor = create_agent(
-            model=model, 
-            tools=tools, 
+            model=model,
+            tools=tools,
             system_prompt="You are a library assistant. Always search before answering."
         )
         self._search_service = search_service
 
-    def _get_or_create_chat(self, session_id: str) -> List[Message]:
-        chat = self.chats.get(session_id)
-        if chat is None:
-            chat = []
-            self.chats[session_id] = chat
-        return chat
-
-    def send_message(self, message: str, session_id: str) -> ChatResponse:
+    def send_message(self, message: str, chat_id: str, chat_history: List[Message] | None = None) -> ChatResponse:
         start_time = time.time()
-        
-        chat_history = self._get_or_create_chat(session_id)
-        
-        messages = chat_history + [HumanMessage(content=message)]
+
+        history = chat_history or []
+        messages = history + [HumanMessage(content=message)]
 
         result = self._agent_executor.invoke({
             "messages": messages
@@ -57,8 +47,7 @@ class ChatService:
 
         parsed_response = self._parse_agent_output(result)
 
-        self.chats[session_id] = result.get("messages", messages)
-
+        all_messages = result.get("messages", messages)
         response_time = time.time() - start_time
         confidence_score = 0.0
         if hasattr(parsed_response, 'result') and parsed_response.result:
@@ -68,8 +57,8 @@ class ChatService:
         start_run()
         log_params({
             "model_name": "qwen3.5-unsloth",
-            "session_id": session_id,
-            "message_count": len(self.chats[session_id])
+            "chat_id": chat_id,
+            "message_count": len(all_messages)
         })
         log_metrics({
             "response_time_seconds": response_time,
@@ -84,8 +73,8 @@ class ChatService:
             answer=parsed_response.answer,
             response_time_seconds=response_time,
             confidence_score=confidence_score,
-            session_id=session_id,
-            message_count=len(self.chats[session_id])
+            session_id=chat_id,
+            message_count=len(all_messages)
         )
     
     def _get_current_turn_messages(self, messages: List[Any]) -> List[Any]:
