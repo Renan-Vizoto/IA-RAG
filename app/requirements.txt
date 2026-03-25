@@ -1,4 +1,5 @@
 minio
+sqlalchemy
 fastapi[standard]
 pymilvus==2.6.9
 sentence-transformers
