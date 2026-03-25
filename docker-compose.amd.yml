@@ -1,0 +1,10 @@
+services:
+  ollama:
+    image: ollama/ollama:rocm
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    environment:
+      HSA_OVERRIDE_GFX_VERSION: "11.0.0"

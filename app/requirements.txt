@@ -1,0 +1,10 @@
+minio
+fastapi[standard]
+pymilvus==2.6.9
+sentence-transformers
+pypdf
+langchain-text-splitters
+langchain_ollama
+langchain
+langchain-community
+mlflow
