@@ -16,3 +16,4 @@ class BucketSchemaBuilder(SchemaBuilder):
         for b in needed_buckets:
             if not self.client.bucket_exists(b):
                 self.client.make_bucket(b)
+            self.client.enable_object_versioning(b)
