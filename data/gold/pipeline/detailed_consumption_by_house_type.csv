@@ -1,0 +1,38 @@
+heating_category,house_type,kwh_per_household,kwh_per_m2,kwh_per_person
+with_and_without_electric_heating,Terraced house - Mid-terrace,3083.0,71.0,
+with_and_without_electric_heating,Terraced house - End-terrace,4258.0,81.0,
+with_and_without_electric_heating,Terraced house - Small up to 70m²,3421.0,75.0,
+with_and_without_electric_heating,Terraced house - Medium/Large above 70m²,4399.0,52.0,
+with_and_without_electric_heating,Semi-detached house,4009.0,76.0,
+with_and_without_electric_heating,Detached house,4256.0,66.0,
+with_and_without_electric_heating,Bungalow,3789.0,59.0,
+with_and_without_electric_heating,Flat,3510.0,77.0,
+with_and_without_electric_heating,Single pensioner household (65+ years old),3427.0,64.0,
+with_and_without_electric_heating,Single non pensioner household,3853.0,69.0,
+with_and_without_electric_heating,Multiple pensioner household,3812.0,70.0,1906.0
+with_and_without_electric_heating,Household with children,3672.0,68.0,966.0
+with_and_without_electric_heating,Multiple person household with no dependent children,4232.0,77.0,1912.0
+without_electric_heating,Terraced house – Mid-terrace,2779.0,62.0,
+without_electric_heating,Terraced house – End-terrace,3442.0,65.0,
+without_electric_heating,Terraced house – Small up to 70m²,2894.0,64.0,
+without_electric_heating,Terraced house – Medium/Large above 70m²,4399.0,52.0,
+without_electric_heating,Semi-detached house,3847.0,73.0,
+without_electric_heating,Detached house,4153.0,62.0,
+without_electric_heating,Bungalow,3866.0,61.0,
+without_electric_heating,Flat,2829.0,53.0,
+without_electric_heating,Single pensioner household (65+ years old),3125.0,57.0,
+without_electric_heating,Single non pensioner household,3562.0,62.0,
+without_electric_heating,Multiple pensioner household,4045.0,71.0,2022.0
+without_electric_heating,Household with children,3244.0,62.0,866.0
+without_electric_heating,Multiple person household with no dependent children,4194.0,73.0,1870.0
+without_electric_heating,Terraced house – Mid-terrace,5626.0,136.0,
+without_electric_heating,Terraced house – Small up to 70m²,6169.0,136.0,
+without_electric_heating,Semi-detached house,4828.0,87.0,
+without_electric_heating,Detached house,4776.0,82.0,
+without_electric_heating,Single non pensioner household,5831.0,107.0,
+without_electric_heating,Multiple pensioner household,3525.0,70.0,1763.0
+without_electric_heating,Household with children,5214.0,82.0,1310.0
+without_electric_heating,Multiple person household with no dependent children,5148.0,108.0,2459.0
+with_primary_electric_heating,Flat,4265.0,105.0,
+with_primary_electric_heating,"13,771",270.0,3443.0,
+with_primary_electric_heating,"4,174",124.0,2087.0,

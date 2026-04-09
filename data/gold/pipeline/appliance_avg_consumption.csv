@@ -1,0 +1,24 @@
+appliance_type,avg_annual_consumption_kwh
+Refrigerator,162.0
+Fridge-freezer,427.0
+Upright freezer,327.0
+Chest freezer,362.0
+Washing machine,166.0
+Washer dryer,243.0
+Clothes dryer,394.0
+Dishwasher,294.0
+Oven,290.0
+Cooker,317.0
+Hob,226.0
+Microwave oven,56.0
+Kettle,167.0
+Lighting,537.0
+Audiovisual site1,465.0
+CRT television,118.0
+LCD television,199.0
+Plasma television,658.0
+Computer site2,240.0
+Space heating (with additional electric heating),1505.0
+Space heating (with primary electric heating),5249.0
+Water heating (with additional electric heating),393.0
+Water heating (with primary electric heating),945.0

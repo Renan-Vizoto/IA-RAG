@@ -8,3 +8,8 @@ langchain_ollama
 langchain
 langchain-community
 mlflow
+pdfplumber
+pandas
+jupyter
+matplotlib
+seaborn

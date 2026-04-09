@@ -1,0 +1,51 @@
+household_type,category,without_heating_all_days,without_heating_holidays,without_heating_workdays,with_heating_all_days,with_heating_holidays,with_heating_workdays
+Single pensioner household (65+ years old),Cold appliances,14.5,14.3,14.5,10.0,9.8,9.9
+Single pensioner household (65+ years old),Cooking,12.0,10.5,12.6,11.3,10.0,11.6
+Single pensioner household (65+ years old),Lighting,19.6,17.2,20.6,8.2,8.4,8.0
+Single pensioner household (65+ years old),Audiovisual,15.6,15.9,15.4,6.3,6.7,6.1
+Single pensioner household (65+ years old),ICT,3.8,3.7,3.8,2.8,2.8,2.7
+Single pensioner household (65+ years old),Washing/Drying,14.1,16.5,13.1,5.8,6.6,5.4
+Single pensioner household (65+ years old),Heating,43.7,42.2,43.7,,,
+Single pensioner household (65+ years old),Water heating,2.4,2.8,2.3,0.2,0.2,0.2
+Single pensioner household (65+ years old),Other,1.7,1.5,1.8,0.6,1.1,0.4
+Single pensioner household (65+ years old),Not known,16.3,17.6,16.0,11.2,12.2,12.1
+Single non-pensioner household,Cold appliances,14.8,14.3,14.9,14.4,14.1,14.5
+Single non-pensioner household,Cooking,14.6,15.4,14.3,10.6,10.5,10.6
+Single non-pensioner household,Lighting,16.7,17.1,16.6,14.1,14.0,14.2
+Single non-pensioner household,Audiovisual,14.3,14.0,14.4,9.2,9.3,9.2
+Single non-pensioner household,ICT,7.0,6.8,7.1,5.0,4.2,5.3
+Single non-pensioner household,Washing/Drying,10.0,9.6,10.1,11.1,9.2,11.8
+Single non-pensioner household,Heating,12.9,13.9,12.4,,,
+Single non-pensioner household,Water heating,4.8,5.2,4.7,0.5,0.4,0.5
+Single non-pensioner household,Other,2.7,2.7,2.7,5.1,6.0,4.8
+Single non-pensioner household,Not known,15.1,14.9,15.3,17.1,18.3,16.6
+Multiple pensioner household,Cold appliances,18.9,18.4,19.1,18.1,18.9,17.7
+Multiple pensioner household,Cooking,11.6,12.4,11.2,12.2,13.5,11.7
+Multiple pensioner household,Lighting,12.5,11.5,12.9,12.2,11.2,12.6
+Multiple pensioner household,Audiovisual,12.0,11.9,12.0,12.0,12.4,11.9
+Multiple pensioner household,ICT,6.4,6.4,6.5,5.5,5.9,5.4
+Multiple pensioner household,Washing/Drying,7.7,8.8,7.2,7.2,6.1,7.6
+Multiple pensioner household,Heating,16.8,16.7,16.8,,,
+Multiple pensioner household,Water heating,10.2,10.9,9.9,5.2,5.0,5.2
+Multiple pensioner household,Other,4.0,3.4,4.3,1.9,2.1,1.9
+Multiple pensioner household,Not known,16.8,16.4,16.9,8.9,8.1,9.3
+Household with children,Cold appliances,15.8,15.1,16.0,16.2,14.7,16.6
+Household with children,Cooking,12.9,13.6,12.6,8.6,9.6,8.0
+Household with children,Lighting,16.3,14.6,16.9,10.9,9.6,11.3
+Household with children,Audiovisual,14.8,15.4,14.5,11.1,11.1,11.0
+Household with children,ICT,5.6,5.4,5.7,4.0,4.0,3.8
+Household with children,Washing/Drying,11.0,13.1,10.0,10.0,12.1,8.8
+Household with children,Heating,12.1,8.3,13.6,,,
+Household with children,Water heating,3.0,2.6,3.2,2.5,2.2,2.6
+Household with children,Other,2.9,3.1,2.8,14.4,18.1,12.4
+Household with children,Not known,17.7,17.0,18.1,10.2,10.2,11.9
+Multiple person household with no dependent children,Cold appliances,13.8,13.9,13.7,7.5,7.2,7.7
+Multiple person household with no dependent children,Cooking,11.9,12.5,11.6,10.1,10.4,10.1
+Multiple person household with no dependent children,Lighting,13.0,12.7,13.0,6.5,5.6,6.9
+Multiple person household with no dependent children,Audiovisual,13.9,14.3,13.7,11.1,11.4,11.0
+Multiple person household with no dependent children,ICT,6.0,5.9,6.0,3.5,3.0,3.7
+Multiple person household with no dependent children,Washing/Drying,15.2,14.3,15.6,10.9,13.0,10.1
+Multiple person household with no dependent children,Heating,22.5,22.2,22.7,,,
+Multiple person household with no dependent children,Water heating,7.0,6.4,7.3,7.7,9.1,7.1
+Multiple person household with no dependent children,Other,4.6,4.3,4.7,2.1,2.3,2.1
+Multiple person household with no dependent children,Not known,14.6,15.8,14.4,17.9,15.9,18.8

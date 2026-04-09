@@ -1,0 +1,15 @@
+household_type,kwh_per_household,kwh_per_m2,kwh_per_person,avg_max_power_demand_w
+Terraced house – mid-terrace,3083.0,71.0,,7188.0
+Terraced house – end-terrace,4258.0,81.0,,7685.0
+Terraced house – small (up to 70 m²),3421.0,75.0,,7156.0
+Terraced house – medium/large (above 70 m²),4399.0,52.0,,10568.0
+Semi-detached house,4009.0,76.0,,7888.0
+Detached house,4256.0,66.0,,7312.0
+Bungalow,3789.0,59.0,,8683.0
+Flat,3510.0,77.0,,7625.0
+Single pensioner household (65+ years old),3427.0,64.0,3427.0,6984.0
+Single non-pensioner household,3853.0,69.0,3853.0,7211.0
+Multiple pensioner household,3812.0,70.0,1906.0,7788.0
+Household with children,3672.0,68.0,966.0,7277.0
+Multiple person household with no dependent children,4232.0,77.0,1912.0,8569.0
+All households,3567.0,71.0,2142.0,7665.0
