@@ -8,6 +8,8 @@ langchain_ollama
 langchain
 langchain-community
 mlflow
+apscheduler
+pydantic-settings
 pdfplumber
 pandas
 jupyter
