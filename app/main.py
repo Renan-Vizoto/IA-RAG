@@ -13,6 +13,7 @@ from app.infrastructure.implementations.embbeding.MiniLML12_embbeding import Min
 from app.infrastructure.repositories.milvus_repo import MilvusRepo
 from app.core.workers.bronze_to_silver import start_worker as start_bronze_to_silver
 from app.core.workers.silver_to_gold import start_worker as start_silver_to_gold
+from app.core.workers.data_pipeline_worker import start_worker as start_data_pipeline
 
 
 app = FastAPI()
@@ -27,6 +28,7 @@ if not milvusClient.has_collection(settings.collection_name):
 
 start_bronze_to_silver(bucket_service, ExtractTextService(ExtractorFactory()))
 start_silver_to_gold(bucket_service, CharacterChunking(), MiniLML12_Embbeding(), milvus_repo)
+start_data_pipeline(bucket_service, client)
 
 app.include_router(chat.router)
 app.include_router(files.router)
