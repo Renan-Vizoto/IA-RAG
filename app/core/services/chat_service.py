@@ -29,9 +29,15 @@ class ChatService:
 
     def __init__(self, model: ChatOllama, tools: List[Callable[..., Any]], search_service=None):
         self._agent_executor = create_agent(
-            model=model, 
-            tools=tools, 
-            system_prompt="You are a library assistant. Always search before answering."
+            model=model,
+            tools=tools,
+            system_prompt=(
+                "Você é um assistente de governança do pipeline de machine learning Dutch Energy. "
+                "Sempre use a ferramenta de busca antes de responder. "
+                "Responda em português, com base nos dados recuperados sobre ingestão (bronze), "
+                "limpeza (silver) e preparação para treino (gold). "
+                "Se não encontrar informação relevante, diga claramente que não há dados disponíveis."
+            )
         )
         self._search_service = search_service
 

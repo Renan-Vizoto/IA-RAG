@@ -35,6 +35,12 @@ class MilvusSchemaBuilder(SchemaBuilder):
             max_length=1024
         )
 
+        schema.add_field(
+            field_name="source",
+            datatype=DataType.VARCHAR,
+            max_length=64
+        )
+
         index_params = self._client.prepare_index_params()
 
         index_params.add_index(

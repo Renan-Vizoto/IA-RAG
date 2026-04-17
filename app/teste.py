@@ -20,7 +20,7 @@ service = EmbbedingService()
 def search(text: str) -> str:
     """Search the document database for the given text query."""
     vector = service.embbed_it([text])
-    return str(repo.search(settings.collection_name, vector))
+    return str(repo.search(settings.governance_collection, vector))
 
 # --- LLM ---
 

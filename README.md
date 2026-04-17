@@ -18,7 +18,7 @@
 
 ## 📋 Assunto
 
-O dataset escolhido está ligado ao estudo **EV0702 Household Electricity Study**, um estudo sobre consumo de eletricidade em residências e comportamento energético conduzido pelo governo britânico.
+O dataset escolhido e o **Energy consumption of the Netherlands** (Luca Basanisi), que contem dados de consumo de eletricidade e gas na Holanda, coletados por sete distribuidoras regionais (Enexis, Liander, Stedin, Enduris, Westlandinfra, Rendo e Coteq). Os dados sao agregados por faixa de CEP (minimo 10 conexoes para anonimizacao) e cobrem multiplos anos.
 
 ## 🎯 Domínio
 
@@ -95,5 +95,5 @@ graph TB
 
 ## 📌 Links Úteis
 
-- **Dataset**: [EV0702 Household Electricity Study](https://randd.defra.gov.uk/ProjectDetails?ProjectID=17359&FromSearch=Y&Publisher=1&SearchText=EV0702&SortString=ProjectCode&SortOrder=Asc&Paging=10#Description)
+- **Dataset**: [Energy consumption of the Netherlands](https://www.kaggle.com/datasets/lucabasa/dutch-energy)
 - **Trello**: [Watttrack - Projeto de Gestão](https://trello.com/invite/b/69aa0fb5e3b7f2d77018470d/ATTIf6ec617a20231c8f424b4a28aa2b04b5F5307FFE/watttrack)

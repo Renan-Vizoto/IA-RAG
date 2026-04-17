@@ -1,39 +1,48 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
-from app.infrastructure.implementations.schema_builders.bucket_schema import BucketSchemaBuilder
-from app.infrastructure.implementations.schema_builders.milvus_schema import MilvusSchemaBuilder
-from app.api.routes import chat, files
-from app.infrastructure.clients.bucket_client import client
+
 from app.infrastructure.clients.milvus_client import milvusClient
+from app.infrastructure.clients.bucket_client import client as minio_client
 from app.infrastructure.configs import settings
-from app.core.services.bucket_service import BucketService
-from app.core.services.extractor_service import ExtractTextService
-from app.core.factories.extractor_factory import ExtractorFactory
-from app.infrastructure.implementations.chunking.character_chunking import CharacterChunking
+from app.infrastructure.implementations.schema_builders.milvus_schema import MilvusSchemaBuilder
 from app.infrastructure.implementations.embbeding.MiniLML12_embbeding import MiniLML12_Embbeding
 from app.infrastructure.repositories.milvus_repo import MilvusRepo
-from app.core.workers.bronze_to_silver import start_worker as start_bronze_to_silver
-from app.core.workers.silver_to_gold import start_worker as start_silver_to_gold
-from app.core.workers.data_pipeline_worker import start_worker as start_data_pipeline
+from app.pipeline.storage import MinioStorage
+from app.core.workers.governance_indexer import start_worker as start_governance_indexer
+from app.api.routes import chat
 
 
-app = FastAPI()
-
-bucket_service = BucketService(client)
 milvus_repo = MilvusRepo(milvusClient)
+schema_builder = MilvusSchemaBuilder(milvusClient)
+embedder = MiniLML12_Embbeding()
+storage = MinioStorage(minio_client)
 
-BucketSchemaBuilder(client).build()
 
-if not milvusClient.has_collection(settings.collection_name):
-    MilvusSchemaBuilder(milvusClient).build(settings.collection_name)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if not milvusClient.has_collection(settings.governance_collection):
+        schema_builder.build(settings.governance_collection)
 
-start_bronze_to_silver(bucket_service, ExtractTextService(ExtractorFactory()))
-start_silver_to_gold(bucket_service, CharacterChunking(), MiniLML12_Embbeding(), milvus_repo)
-start_data_pipeline(bucket_service, client)
+    indexer = start_governance_indexer(
+        storage=storage,
+        repo=milvus_repo,
+        embedder=embedder,
+        schema_builder=schema_builder,
+        collection=settings.governance_collection,
+    )
+
+    # Indexação imediata ao subir (não espera o primeiro tick de 10 min)
+    await indexer.run()
+
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.include_router(chat.router)
-app.include_router(files.router)
+
 
 @app.get("/health")
 def health():
-    return { "ok": "ok" }
-
+    return {"ok": "ok"}

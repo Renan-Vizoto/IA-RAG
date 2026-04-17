@@ -9,6 +9,6 @@ class SearchService:
         self._embbed = embbeder
 
     def search(self, text: str) -> str:
-        """Search the document database for the given text query."""
+        """Busca na base de governança do pipeline Dutch Energy."""
         vector = self._embbed.embbed_it([text])
-        return self._repo.search(settings.collection_name, vector)
+        return self._repo.search(settings.governance_collection, vector)
