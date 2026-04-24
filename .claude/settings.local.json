@@ -3,7 +3,13 @@
     "allow": [
       "Bash(pip install:*)",
       "Bash(python -c \":*)",
-      "Bash(python -m app.pipeline.run_pipeline \"C:\\\\Users\\\\guilh\\\\Downloads\\\\727_EV0702.pdf\")"
+      "Bash(python -m app.pipeline.run_pipeline \"C:\\\\Users\\\\guilh\\\\Downloads\\\\727_EV0702.pdf\")",
+      "Read(//mnt/c/Users/guilh/AppData/Local/Programs/**)",
+      "Read(//mnt/c/Users/guilh/miniconda3/**)",
+      "Read(//mnt/c/Users/guilh/anaconda3/**)",
+      "Read(//mnt/c/Users/guilh/**)",
+      "Bash(.venv/Scripts/python.exe *)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }
