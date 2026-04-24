@@ -39,7 +39,7 @@ USE_COLS = [
     "net_manager", "purchase_area", "city", "num_connections",
     "delivery_perc", "perc_of_active_connections", "type_of_connection",
     "type_conn_perc", "annual_consume", "annual_consume_lowtarif_perc",
-    "smartmeter_perc",
+    "smartmeter_perc", "consume_per_conn",
 ]
 
 NUM_COLS = [
@@ -53,11 +53,21 @@ CAT_COLS = ["net_manager", "purchase_area", "city", "type_of_connection"]
 PCT_COLS = [c for c in NUM_COLS if "perc" in c]
 
 
-def transform(storage: StorageBackend) -> pd.DataFrame:
+def transform(storage: StorageBackend, force: bool = False) -> pd.DataFrame:
     """
     Executa o pipeline Silver completo: le do bronze, limpa e salva no silver.
     Retorna o DataFrame limpo.
+    Aplica idempotencia (pula se ja processado e nao forçado).
     """
+    obj_name = f"{SILVER_PREFIX}cleaned.csv"
+    
+    if not force:
+        meta = storage.stat_object(SILVER_BUCKET, obj_name)
+        if meta.get("silver_completed") == "true":
+            logger.info("[SILVER] Pulo: Dataset ja limpo e consolidado.")
+            raw = storage.get_object(SILVER_BUCKET, obj_name)
+            return pd.read_csv(raw, low_memory=False)
+
     raw_df = _load_bronze(storage)
     df, stats = _clean(raw_df)
     del raw_df; gc.collect()
@@ -190,7 +200,15 @@ def _save_silver(df: pd.DataFrame, stats: dict, storage: StorageBackend):
     csv_buf = BytesIO()
     df_out.to_csv(csv_buf, index=False, encoding="utf-8")
     csv_buf.seek(0)
-    storage.put_object(SILVER_BUCKET, f"{SILVER_PREFIX}cleaned.csv", csv_buf, "text/csv")
+    
+    # Salva com metadado de conclusao
+    storage.put_object(
+        SILVER_BUCKET, 
+        f"{SILVER_PREFIX}cleaned.csv", 
+        csv_buf, 
+        "text/csv",
+        metadata={"silver_completed": "true", "transformed_at": datetime.now(timezone.utc).isoformat()}
+    )
     logger.info(f"[SILVER] Salvo: {SILVER_PREFIX}cleaned.csv ({len(df):,} rows)")
 
     # Estatisticas de limpeza

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 SEPARATOR = "=" * 55
 
 
-def run(data_dir: str, use_minio: bool = True):
+def run(data_dir: str, use_minio: bool = True, force: bool = False):
     storage = create_storage(use_minio=use_minio, base_dir="data")
 
     # ── Bronze ──────────────────────────────────────────────
@@ -36,30 +36,27 @@ def run(data_dir: str, use_minio: bool = True):
     logger.info("BRONZE - Ingestao dos CSVs brutos")
     logger.info(SEPARATOR)
     ingested = ingest_csvs(data_dir, storage)
-    logger.info(f"Arquivos ingeridos: {len(ingested)}")
-    for obj in ingested:
-        logger.info(f"  {obj}")
+    logger.info(f"Arquivos ingeridos/verificados: {len(ingested)}")
 
     # ── Silver ──────────────────────────────────────────────
     logger.info(SEPARATOR)
     logger.info("SILVER - Limpeza e validacao")
     logger.info(SEPARATOR)
-    silver_df = transform(storage)
-    logger.info(f"Dataset limpo: {len(silver_df):,} registros x {silver_df.shape[1]} colunas")
-    logger.info(f"Distribuicao annual_consume: "
-                f"min={silver_df['annual_consume'].min():.0f} | "
-                f"median={silver_df['annual_consume'].median():.0f} | "
-                f"max={silver_df['annual_consume'].max():.0f} kWh")
+    silver_df = transform(storage, force=force)
+    logger.info(f"Dataset em memoria: {len(silver_df):,} registros")
 
     # ── Gold ─────────────────────────────────────────────────
     logger.info(SEPARATOR)
     logger.info("GOLD - Feature engineering + split + normalizacao")
     logger.info(SEPARATOR)
-    gold = build(storage)
-    logger.info("Artefatos prontos para treinamento:")
-    for name, arr in gold.items():
-        shape = arr.shape if hasattr(arr, "shape") else (len(arr),)
-        logger.info(f"  {name}: {shape}")
+    gold = build(storage, force=force)
+    if gold:
+        logger.info("Artefatos prontos para treinamento:")
+        for name, arr in gold.items():
+            shape = arr.shape if hasattr(arr, "shape") else (len(arr),)
+            logger.info(f"  {name}: {shape}")
+    else:
+        logger.info("Gold Layer pulada (ja processada).")
 
     logger.info(SEPARATOR)
     logger.info("Pipeline Dutch Energy concluido com sucesso!")
@@ -80,9 +77,14 @@ def _parse_args():
         action="store_true",
         help="Usa storage local ao inves do MinIO",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Força re-processamento das camadas Silver e Gold",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
-    run(data_dir=args.data_dir, use_minio=not args.local)
+    run(data_dir=args.data_dir, use_minio=not args.local, force=args.force)
