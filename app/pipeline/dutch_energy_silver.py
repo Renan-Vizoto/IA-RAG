@@ -246,8 +246,9 @@ def _feature_engineering(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     return df, fe_stats
 
 
-def _build_governance_doc(stats: dict, fe_stats: dict, df: pd.DataFrame) -> str:
-    ts = datetime.now(timezone.utc).isoformat()
+def _build_governance_doc(stats: dict, fe_stats: dict, df: pd.DataFrame, ts: str = None) -> str:
+    if ts is None:
+        ts = datetime.now(timezone.utc).isoformat()
     initial = stats.get("initial_rows", 0)
     dups = stats.get("removed_duplicates", 0)
     invalid_consume = stats.get("removed_invalid_consume", 0)
@@ -267,6 +268,47 @@ def _build_governance_doc(stats: dict, fe_stats: dict, df: pd.DataFrame) -> str:
         type_rows.append(f"| {col} | {str(df[col].dtype)} | {desc} |")
     types_table = "\n".join(type_rows)
 
+    # Cobertura temporal
+    year_range = ""
+    if "year" in df.columns:
+        y_min, y_max = int(df["year"].min()), int(df["year"].max())
+        year_range = f"- **Cobertura temporal**: {y_min} – {y_max} ({y_max - y_min + 1} anos)"
+
+    # Cardinalidade dos categóricos
+    cat_lines = []
+    for col in ["net_manager", "purchase_area", "city"]:
+        if col in df.columns:
+            n = df[col].nunique()
+            cat_lines.append(f"| {col} | {n:,} |")
+    cat_table = "\n".join(cat_lines) if cat_lines else "| — | — |"
+
+    # Estatísticas das principais features numéricas
+    def _stat_row(col, label=None):
+        if col not in df.columns:
+            return ""
+        s = df[col].dropna()
+        lbl = label or col
+        return (f"| {lbl} | {s.mean():,.2f} | {s.std():,.2f} | "
+                f"{s.min():,.2f} | {s.median():,.2f} | {s.max():,.2f} |")
+
+    stat_rows = "\n".join(filter(None, [
+        _stat_row("annual_consume", "annual_consume (kWh)"),
+        _stat_row("consume_per_conn", "consume_per_conn (kWh/conn)"),
+        _stat_row("num_connections", "num_connections"),
+        _stat_row("amperage", "amperage (A)"),
+        _stat_row("total_capacity", "total_capacity (A·conn)"),
+    ]))
+
+    # NaNs relevantes após FE
+    nan_lines = []
+    for col in ["amperage", "total_capacity", "purchase_area", "delivery_perc",
+                "type_conn_perc", "annual_consume_lowtarif_perc"]:
+        if col in df.columns:
+            n = int(df[col].isna().sum())
+            if n > 0:
+                nan_lines.append(f"| {col} | {n:,} | {n/len(df)*100:.1f}% |")
+    nan_table = "\n".join(nan_lines) if nan_lines else "| — | — | — |"
+
     doc = f"""# Documento de Governança — Camada Silver
 ## Dataset: Dutch Energy Electricity Consumption
 ## Processado em: {ts}
@@ -281,7 +323,17 @@ def _build_governance_doc(stats: dict, fe_stats: dict, df: pd.DataFrame) -> str:
 
 ---
 
-## 2. Limpeza de Dados
+## 2. Cobertura e Cardinalidade
+
+{year_range}
+
+| Coluna Categórica | Valores Únicos |
+|-------------------|---------------|
+{cat_table}
+
+---
+
+## 3. Limpeza de Dados
 
 | Operação | Registros Removidos |
 |----------|-------------------|
@@ -294,7 +346,7 @@ def _build_governance_doc(stats: dict, fe_stats: dict, df: pd.DataFrame) -> str:
 
 ---
 
-## 3. Feature Engineering
+## 4. Feature Engineering
 
 | Feature Criada | Origem | Transformação Aplicada |
 |---------------|--------|----------------------|
@@ -310,7 +362,27 @@ def _build_governance_doc(stats: dict, fe_stats: dict, df: pd.DataFrame) -> str:
 
 ---
 
-## 4. Resumo Final
+## 5. Valores Ausentes Relevantes (pós FE)
+
+> Registros com NaN em `amperage`/`total_capacity` surgem de entradas onde
+> `type_of_connection` é nulo ou não segue o padrão `NxM`.
+> Esses registros serão descartados na camada Gold (dropna nas features).
+
+| Coluna | NaNs | % do Total |
+|--------|------|-----------|
+{nan_table}
+
+---
+
+## 6. Distribuição das Features Principais
+
+| Feature | Média | Desvio Padrão | Mínimo | Mediana | Máximo |
+|---------|-------|--------------|--------|---------|--------|
+{stat_rows}
+
+---
+
+## 7. Resumo Final
 
 | Métrica | Valor |
 |---------|-------|
@@ -321,7 +393,7 @@ def _build_governance_doc(stats: dict, fe_stats: dict, df: pd.DataFrame) -> str:
 
 ---
 
-## 5. Colunas Descartadas para o Modelo
+## 8. Colunas Descartadas para o Modelo
 
 - `type_of_connection`: substituída pela feature numérica `amperage`
 - `annual_consume`: substituída pelo target `consume_per_conn` e `log_target`

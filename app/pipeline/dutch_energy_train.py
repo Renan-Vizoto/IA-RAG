@@ -15,6 +15,7 @@ import json
 import pickle
 import logging
 import tempfile
+import time
 import os
 from io import BytesIO
 from datetime import datetime, timezone
@@ -54,8 +55,9 @@ def train(storage: StorageBackend) -> dict:
     """
     _configure_mlflow()
 
-    X_train, y_train, X_val, y_val, feat_cols = _load_gold(storage)
+    X_train, y_train, X_val, y_val, X_test, y_test, feat_cols = _load_gold(storage)
 
+    t0 = time.time()
     with mlflow.start_run() as run:
         run_id = run.info.run_id
         logger.info(f"[TRAIN] MLflow run iniciado: {run_id}")
@@ -65,6 +67,7 @@ def train(storage: StorageBackend) -> dict:
         mlflow.log_param("n_features", len(feat_cols))
         mlflow.log_param("n_train", len(X_train))
         mlflow.log_param("n_val", len(X_val))
+        mlflow.log_param("n_test", len(X_test))
 
         model = xgb.XGBRegressor(**XGBOOST_PARAMS)
         model.fit(
@@ -72,15 +75,26 @@ def train(storage: StorageBackend) -> dict:
             eval_set=[(X_val, y_val)],
             verbose=False,
         )
+        train_duration = time.time() - t0
 
-        metrics = _evaluate(model, X_val, y_val)
-        mlflow.log_metrics(metrics)
-        logger.info(f"[TRAIN] Métricas validação: {metrics}")
+        val_metrics  = _evaluate(model, X_val, y_val)
+        test_metrics = _evaluate(model, X_test, y_test)
 
+        mlflow.log_metrics({f"val_{k}": v for k, v in val_metrics.items()})
+        mlflow.log_metrics({f"test_{k}": v for k, v in test_metrics.items()})
+        mlflow.log_metric("train_duration_sec", round(train_duration, 1))
+        logger.info(f"[TRAIN] Métricas validação: {val_metrics}")
+        logger.info(f"[TRAIN] Métricas teste: {test_metrics}")
+
+        importance = dict(zip(feat_cols, model.feature_importances_.tolist()))
         mlflow.xgboost.log_model(model, "xgboost_model")
 
         # Relatório markdown
-        report = _build_report(run_id, metrics, len(X_train), len(X_val), feat_cols)
+        report = _build_report(
+            run_id, val_metrics, test_metrics, importance,
+            train_duration, len(X_train), len(X_val), len(X_test), feat_cols,
+            y_train,
+        )
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as f:
             f.write(report)
             report_path = f.name
@@ -95,7 +109,8 @@ def train(storage: StorageBackend) -> dict:
     model_info = {
         "run_id": run_id,
         "algorithm": "XGBoost",
-        "metrics": {k: round(v, 4) for k, v in metrics.items()},
+        "metrics": {k: round(v, 4) for k, v in val_metrics.items()},
+        "test_metrics": {k: round(v, 4) for k, v in test_metrics.items()},
         "params": {k: str(v) for k, v in XGBOOST_PARAMS.items()},
     }
 
@@ -127,15 +142,17 @@ def _load_gold(storage: StorageBackend):
     y_train = read_csv("y_train").values.ravel()
     X_val   = read_csv("X_val").values
     y_val   = read_csv("y_val").values.ravel()
+    X_test  = read_csv("X_test").values
+    y_test  = read_csv("y_test").values.ravel()
 
     feat_raw = storage.get_object(GOLD_BUCKET, f"{GOLD_PREFIX}feature_cols.json")
     feat_cols: list[str] = json.loads(feat_raw.read().decode("utf-8"))
 
     logger.info(
         f"[TRAIN] Dados carregados: train={X_train.shape}, val={X_val.shape}, "
-        f"features={len(feat_cols)}"
+        f"test={X_test.shape}, features={len(feat_cols)}"
     )
-    return X_train, y_train, X_val, y_val, feat_cols
+    return X_train, y_train, X_val, y_val, X_test, y_test, feat_cols
 
 
 def _evaluate(model, X_val: np.ndarray, y_val: np.ndarray) -> dict:
@@ -151,10 +168,35 @@ def _evaluate(model, X_val: np.ndarray, y_val: np.ndarray) -> dict:
     return {"rmse": rmse, "mae": mae, "r2": r2, "mape": mape}
 
 
-def _build_report(run_id: str, metrics: dict, n_train: int, n_val: int, feat_cols: list[str]) -> str:
+def _build_report(
+    run_id: str,
+    val_metrics: dict,
+    test_metrics: dict,
+    importance: dict,
+    train_duration: float,
+    n_train: int,
+    n_val: int,
+    n_test: int,
+    feat_cols: list[str],
+    y_train: np.ndarray,
+) -> str:
     ts = datetime.now(timezone.utc).isoformat()
     param_rows = "\n".join(f"| {k} | {v} |" for k, v in XGBOOST_PARAMS.items())
-    metric_rows = "\n".join(f"| {k.upper()} | {v:.4f} |" for k, v in metrics.items())
+    val_rows  = "\n".join(f"| {k.upper()} | {v:.4f} |" for k, v in val_metrics.items())
+    test_rows = "\n".join(f"| {k.upper()} | {v:.4f} |" for k, v in test_metrics.items())
+
+    # Feature importance ordenada
+    top_imp = sorted(importance.items(), key=lambda x: -x[1])
+    imp_rows = "\n".join(f"| {f} | {v:.4f} | {v*100:.1f}% |" for f, v in top_imp)
+
+    # Baseline: predição pela média do treino
+    baseline_pred = np.full(n_val, float(np.mean(y_train)))
+
+    # Estatísticas do target no treino (espaço original)
+    cpc_mean = float(np.expm1(np.mean(y_train)))
+    cpc_median = float(np.expm1(np.median(y_train)))
+
+    mins, secs = divmod(int(train_duration), 60)
 
     return f"""# Relatório MLflow — Treinamento Dutch Energy
 ## Experimento: dutch-energy-training
@@ -168,6 +210,7 @@ def _build_report(run_id: str, metrics: dict, n_train: int, n_val: int, feat_col
 - **Modelo**: XGBoost Regressor
 - **Objetivo**: minimizar RMSE em espaço log (target = log1p(consume_per_conn))
 - **Selecionado com base em**: melhor R² e RMSE nos notebooks de análise exploratória
+- **Tempo de treinamento**: {mins}min {secs}s
 
 ---
 
@@ -185,22 +228,43 @@ def _build_report(run_id: str, metrics: dict, n_train: int, n_val: int, feat_col
 |----------|-----------|
 | Treino   | {n_train:,} |
 | Validação| {n_val:,} |
+| Teste    | {n_test:,} |
 | Features | {len(feat_cols)} |
+
+**Distribuição do target no treino (espaço original):**
+- Consumo médio por conexão: ~{cpc_mean:,.1f} kWh/conn
+- Consumo mediano por conexão: ~{cpc_median:,.1f} kWh/conn
 
 ---
 
-## 4. Métricas de Avaliação (conjunto de validação)
+## 4. Métricas de Avaliação — Validação
 
 | Métrica | Valor |
 |---------|-------|
-{metric_rows}
-
-> Métricas calculadas no espaço original (desfazendo log1p) para MAPE;
-> RMSE e MAE calculados no espaço log.
+{val_rows}
 
 ---
 
-## 5. Features Utilizadas
+## 5. Métricas de Avaliação — Teste (conjunto não visto)
+
+| Métrica | Valor |
+|---------|-------|
+{test_rows}
+
+> RMSE e MAE calculados em espaço log; MAPE no espaço original (kWh/conn).
+> Conjunto de teste **não utilizado** durante o treinamento ou seleção de hiperparâmetros.
+
+---
+
+## 6. Importância das Features
+
+| Feature | Importância | % |
+|---------|-------------|---|
+{imp_rows}
+
+---
+
+## 7. Features Utilizadas
 
 {chr(10).join(f'- {f}' for f in feat_cols)}
 """
