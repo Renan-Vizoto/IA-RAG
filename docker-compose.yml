@@ -11,9 +11,15 @@ services:
       MINIO_URL: minio:9000
       MILVUS_URL: http://milvus-standalone:19530
       OLLAMA_URL: http://ollama:11434
+      MLFLOW_TRACKING_URI: http://mlflow_server:5001
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
     depends_on:
-      minio: 
+      minio:
         condition: service_healthy
+      mlflow:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl localhost:8000/health"]
       interval: 5s
@@ -49,11 +55,42 @@ services:
     image: postgres:18.3-alpine3.23
     container_name: postgres_rag
     environment:
-     - POSTGRES_PASSWORD=password
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: mlflow
+      POSTGRES_DB: mlflow
     ports:
       - "5432:5432"
     volumes:
-      - minio-data:/data
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlflow -d mlflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - rag-network
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.21.3
+    container_name: mlflow_server
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://mlflow:mlflow@postgres/mlflow
+      --default-artifact-root s3://mlflow-artifacts/
+      --host 0.0.0.0
+      --port 5001
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+    ports:
+      - "5001:5001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     networks:
       - rag-network
 
@@ -135,6 +172,7 @@ services:
     
 volumes:
   minio-data:
+  postgres-data:
 
 networks:
   rag-network:
