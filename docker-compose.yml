@@ -52,7 +52,7 @@ services:
       - rag-network
 
   postgres:
-    image: postgres:18.3-alpine3.23
+    image: postgres:16-alpine
     container_name: postgres_rag
     environment:
       POSTGRES_USER: mlflow
@@ -72,14 +72,15 @@ services:
       - rag-network
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.21.3
+    image: ghcr.io/mlflow/mlflow:v3.1.0
     container_name: mlflow_server
     command: >
+      sh -c "pip install --quiet psycopg2-binary boto3 &&
       mlflow server
       --backend-store-uri postgresql://mlflow:mlflow@postgres/mlflow
       --default-artifact-root s3://mlflow-artifacts/
       --host 0.0.0.0
-      --port 5001
+      --port 5001"
     environment:
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
       AWS_ACCESS_KEY_ID: minioadmin
