@@ -5,9 +5,10 @@ Uso:
     python -m app.pipeline.run_dutch_energy_pipeline --data-dir notebooks/data
 
 Layers:
-    Bronze -> armazena CSVs brutos sem transformacao
-    Silver -> limpa, consolida e valida os dados
-    Gold   -> feature engineering + split + normalizacao (pronto para treino)
+    Bronze   -> armazena CSVs brutos sem transformacao
+    Silver   -> limpeza + feature engineering + gera governance_silver.md
+    Gold     -> split 70/15/15 + encoding + scaling + gera governance_gold.md
+    Training -> XGBoost com MLflow + salva mlflow_report.md + atualiza governance_gold.md
 """
 import sys
 import argparse
@@ -17,6 +18,7 @@ from app.pipeline.storage import create_storage
 from app.pipeline.dutch_energy_bronze import ingest_csvs
 from app.pipeline.dutch_energy_silver import transform
 from app.pipeline.dutch_energy_gold import build
+from app.pipeline.dutch_energy_train import train
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,7 +49,7 @@ def run(data_dir: str, use_minio: bool = True, force: bool = False):
 
     # ── Gold ─────────────────────────────────────────────────
     logger.info(SEPARATOR)
-    logger.info("GOLD - Feature engineering + split + normalizacao")
+    logger.info("GOLD - Split 70/15/15 + encoding + normalizacao")
     logger.info(SEPARATOR)
     gold = build(storage, force=force)
     if gold:
@@ -57,6 +59,14 @@ def run(data_dir: str, use_minio: bool = True, force: bool = False):
             logger.info(f"  {name}: {shape}")
     else:
         logger.info("Gold Layer pulada (ja processada).")
+
+    # ── Training ─────────────────────────────────────────────
+    logger.info(SEPARATOR)
+    logger.info("TRAINING - XGBoost + MLflow")
+    logger.info(SEPARATOR)
+    model_info = train(storage)
+    logger.info(f"Modelo treinado. Run ID: {model_info.get('run_id')}")
+    logger.info(f"Métricas: {model_info.get('metrics')}")
 
     logger.info(SEPARATOR)
     logger.info("Pipeline Dutch Energy concluido com sucesso!")

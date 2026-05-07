@@ -1,4 +1,4 @@
-from typing import Dict, List, Callable, Any, Union
+from typing import Dict, List, Callable, Any, Union, Optional
 import time
 import re
 from langchain_ollama import ChatOllama
@@ -27,19 +27,23 @@ class ParsedResponse(BaseModel):
 class ChatService:
     chats: Dict[str, List[Message]] = {}
 
-    def __init__(self, model: ChatOllama, tools: List[Callable[..., Any]], search_service=None):
+    def __init__(self, model: ChatOllama, tools: List[Callable[..., Any]], search_service=None, mlflow_search_service=None):
         self._agent_executor = create_agent(
             model=model,
             tools=tools,
             system_prompt=(
                 "Você é um assistente de governança do pipeline de machine learning Dutch Energy. "
                 "Sempre use a ferramenta de busca antes de responder. "
+                "Você tem acesso a dois tipos de fonte de dados: "
+                "(1) dados estruturados do PostgreSQL/MLflow com metadados e métricas de treinamento, "
+                "e (2) documentos de governança semânticos no banco vetorial (Milvus). "
                 "Responda em português, com base nos dados recuperados sobre ingestão (bronze), "
-                "limpeza (silver) e preparação para treino (gold). "
+                "processamento (silver), split de dados (gold) e treinamento do modelo. "
                 "Se não encontrar informação relevante, diga claramente que não há dados disponíveis."
             )
         )
         self._search_service = search_service
+        self._mlflow_search_service = mlflow_search_service
 
     def _get_or_create_chat(self, session_id: str) -> List[Message]:
         chat = self.chats.get(session_id)
@@ -50,10 +54,20 @@ class ChatService:
 
     def send_message(self, message: str, session_id: str) -> ChatResponse:
         start_time = time.time()
-        
+
+        # 1º: busca estruturada no PostgreSQL via MLflow
+        postgres_context = ""
+        if self._mlflow_search_service:
+            postgres_context = self._mlflow_search_service.search(message)
+
         chat_history = self._get_or_create_chat(session_id)
-        
-        messages = chat_history + [HumanMessage(content=message)]
+
+        # Inclui contexto do PostgreSQL na mensagem enviada ao agente
+        user_content = message
+        if postgres_context:
+            user_content = f"{postgres_context}\n\n---\nPergunta do usuário: {message}"
+
+        messages = chat_history + [HumanMessage(content=user_content)]
 
         result = self._agent_executor.invoke({
             "messages": messages

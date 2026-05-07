@@ -5,6 +5,8 @@ import uuid
 
 from app.core.services.chat_service import ChatService
 from app.core.services.search_service import SearchService
+from app.core.services.mlflow_search_service import MLflowSearchService
+from app.infrastructure.clients.postgres_client import MLflowSearchClient
 from app.infrastructure.implementations.embbeding.MiniLML12_embbeding import MiniLML12_Embbeding
 from app.infrastructure.repositories.milvus_repo import MilvusRepo
 from app.infrastructure.clients import ollama, milvus_client
@@ -24,10 +26,16 @@ embbeder = MiniLML12_Embbeding()
 repo = MilvusRepo(milvus_client.milvusClient)
 
 searchService = SearchService(repo, embbeder)
+mlflowSearchService = MLflowSearchService(MLflowSearchClient())
 
 search_tool = tool(searchService.search)
 
-chatService = ChatService(ollama.client, [search_tool], search_service=searchService)
+chatService = ChatService(
+    ollama.client,
+    [search_tool],
+    search_service=searchService,
+    mlflow_search_service=mlflowSearchService,
+)
 
 @router.post("/message", response_model=ChatResponse)
 def send_message(
