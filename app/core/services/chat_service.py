@@ -87,7 +87,7 @@ class ChatService:
 
         start_run()
         log_params({
-            "model_name": "qwen3.5-unsloth",
+            "model_name": "gemma4-unsloth",
             "session_id": session_id,
             "message_count": len(self.chats[session_id])
         })
@@ -120,8 +120,14 @@ class ChatService:
         for msg in messages:
             if isinstance(msg, AIMessage) or getattr(msg, "type", "") == "ai":
                 content = msg.content if isinstance(msg.content, str) else ""
-                think_matches = re.findall(r"<think>(.*?)</think>", content, re.DOTALL)
-                for match in think_matches:
+                # Gemma 4: <|channel>thought\n...<espaço> antes da resposta
+                gemma_matches = re.findall(r"<\|channel>thought\n(.*?)(?:\s*$|\s*<\|)", content, re.DOTALL)
+                for match in gemma_matches:
+                    if match.strip():
+                        think_blocks.append(match.strip())
+                # Qwen3 fallback: <think>...</think>
+                qwen_matches = re.findall(r"<think>(.*?)</think>", content, re.DOTALL)
+                for match in qwen_matches:
                     if match.strip():
                         think_blocks.append(match.strip())
         return "\n".join(think_blocks) if think_blocks else ""
@@ -182,7 +188,9 @@ class ChatService:
         thinking = self._extract_thinking(current_turn_msgs)
         search_results = self._extract_search_results(current_turn_msgs)
         
-        answer = re.sub(r"<think>.*?</think>", "", raw_output, flags=re.DOTALL).strip()
+        # Remove thinking blocks de ambos os formatos (Gemma 4 e Qwen3)
+        answer = re.sub(r"<\|channel>thought\n.*?(?=\S|\Z)", "", raw_output, flags=re.DOTALL)
+        answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
         
         return ParsedResponse(
             thinking=thinking,

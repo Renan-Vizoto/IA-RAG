@@ -12,7 +12,6 @@ Dispara re-indexação quando os documentos forem atualizados
 (detecta mudança via timestamp do governance_gold.md).
 """
 import logging
-from io import BytesIO
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -85,7 +84,6 @@ class GovernanceIndexer:
         try:
             raw = self._storage.get_object("gold", "dutch-energy/governance_gold.md")
             content = raw.read().decode("utf-8")
-            # Extrai a data do cabeçalho do doc
             for line in content.splitlines():
                 if line.startswith("## Processado em:"):
                     return line.split(":", 1)[1].strip()

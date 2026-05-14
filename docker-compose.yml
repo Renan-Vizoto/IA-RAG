@@ -21,11 +21,11 @@ services:
       mlflow:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl localhost:8000/health"]
-      interval: 5s
-      timeout: 3s
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3333/health')"]
+      interval: 10s
+      timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
     networks:
       - rag-network
 

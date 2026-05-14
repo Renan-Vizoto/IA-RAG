@@ -2,3 +2,6 @@
 __pycache__
 notebooks/data/
 data/
+
+# Volumes Docker (dados gerados em runtime, não versionar)
+volumes/

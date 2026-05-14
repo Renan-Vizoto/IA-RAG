@@ -68,8 +68,10 @@ class MinioStorage(StorageBackend):
     def stat_object(self, bucket: str, name: str) -> dict:
         try:
             res = self._client.stat_object(bucket, name)
-            # Minio retorna metadados com prefixo x-amz-meta-
-            return {k.replace("x-amz-meta-", ""): v for k, v in res.metadata.items()}
+            meta = {k.replace("x-amz-meta-", ""): v for k, v in res.metadata.items()}
+            meta["size"] = res.size
+            meta["last_modified"] = str(res.last_modified)
+            return meta
         except Exception:
             return {}
 
@@ -125,11 +127,17 @@ class LocalStorage(StorageBackend):
                 json.dump(metadata, f)
 
     def stat_object(self, bucket: str, name: str) -> dict:
-        meta_path = self._path(bucket, name) + ".meta"
+        file_path = self._path(bucket, name)
+        meta: dict = {}
+        meta_path = file_path + ".meta"
         if os.path.exists(meta_path):
             with open(meta_path, "r") as f:
-                return json.load(f)
-        return {}
+                meta = json.load(f)
+        if os.path.exists(file_path):
+            stat = os.stat(file_path)
+            meta["size"] = stat.st_size
+            meta["last_modified"] = str(stat.st_mtime)
+        return meta
 
 
 def create_storage(use_minio: bool = True, base_dir: str = "data") -> StorageBackend:
