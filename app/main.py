@@ -10,7 +10,7 @@ from app.infrastructure.implementations.embbeding.MiniLML12_embbeding import Min
 from app.infrastructure.repositories.milvus_repo import MilvusRepo
 from app.pipeline.storage import MinioStorage
 from app.core.workers.governance_indexer import start_worker as start_governance_indexer
-from app.api.routes import chat
+from app.api.routes import chat, query
 
 
 milvus_repo = MilvusRepo(milvusClient)
@@ -38,11 +38,17 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="Dutch Energy RAG API",
+    description="API de Retrieval Augmented Generation para análise de consumo de energia elétrica holandesa.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 app.include_router(chat.router)
+app.include_router(query.router)
 
 
-@app.get("/health")
+@app.get("/health", tags=["health"], summary="Healthcheck da API")
 def health():
     return {"ok": "ok"}
