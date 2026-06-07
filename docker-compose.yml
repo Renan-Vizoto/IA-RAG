@@ -11,15 +11,27 @@ services:
       MINIO_URL: minio:9000
       MILVUS_URL: http://milvus-standalone:19530
       OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4-unsloth}
       MLFLOW_TRACKING_URI: http://mlflow_server:5001
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
+      CHAT_DATABASE_URL: postgresql://mlflow:mlflow@postgres/rag
+      EMBEDDING_MODEL_PATH: /models/paraphrase-multilingual-MiniLM-L12-v2
+      EMBEDDING_MODEL_DIR: /models/paraphrase-multilingual-MiniLM-L12-v2
+      EMBEDDING_MODEL_HF_ID: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/embeddings:/models
+      - ./embedding-setup.sh:/embedding-setup.sh:ro
+    entrypoint: ["/bin/bash", "/embedding-setup.sh"]
+    command: ["fastapi", "run", "app/main.py", "--port", "3333"]
     depends_on:
       minio:
         condition: service_healthy
       mlflow:
         condition: service_started
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3333/health')"]
       interval: 10s
@@ -62,6 +74,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init-rag-db.sh:/docker-entrypoint-initdb.d/init-rag-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mlflow -d mlflow"]
       interval: 5s
@@ -160,13 +173,14 @@ services:
     ports:
       - 11435:11434
     environment:
-      ollama: /root/.ollama
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4-unsloth}
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/ollama:/root/.ollama
+      - ./ollama-entrypoint.sh:/ollama-entrypoint.sh:ro
       - ./ollama-setup.sh:/ollama-setup.sh:ro
+      - ./ollama-setup-qwen.sh:/ollama-setup-qwen.sh:ro
       - ./ollama-setup-9b.sh:/ollama-setup-9b.sh:ro
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["bash /ollama-setup.sh"]
+    entrypoint: ["/bin/bash", "/ollama-entrypoint.sh"]
     networks:
       - rag-network
     restart: no

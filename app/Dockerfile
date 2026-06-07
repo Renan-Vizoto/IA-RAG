@@ -10,5 +10,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . app/
 
 ENV PYTHONPATH=/code
+ENV EMBEDDING_MODEL_DIR=/models/paraphrase-multilingual-MiniLM-L12-v2
 
 CMD ["fastapi", "run", "app/main.py", "--port", "3333"]

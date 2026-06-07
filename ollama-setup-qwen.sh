@@ -1,22 +1,26 @@
 #!/bin/bash
 set -e
 
-# Check if the model file exists
-if [ ! -f /root/.ollama/Qwen3.5-9B-UD-Q4_K_XL.gguf ]; then
-  echo "ERROR: Model file not found at /root/.ollama/Qwen3.5-9B-UD-Q4_K_XL.gguf"
-  echo "Please ensure the file is present before running this script."
-  exit 1
+apt-get update && apt-get install -y curl
+
+GGUF_PATH="/root/.ollama/Qwen3.5-0.8B-Q4_K_M.gguf"
+HF_URL="https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf"
+MODEL_NAME="qwen3.5-0.8b-unsloth"
+
+if [ ! -f "$GGUF_PATH" ]; then
+  echo "Downloading Qwen3.5-0.8B model..."
+  mkdir -p /root/.ollama
+  curl -L -o "$GGUF_PATH" "$HF_URL"
+else
+  echo "Model already exists, skipping download."
 fi
 
-echo "Model file found at /root/.ollama/Qwen3.5-9B-UD-Q4_K_XL.gguf"
-
-cat > /Modelfile-9b << 'EOF'
-FROM /root/.ollama/Qwen3.5-9B-UD-Q4_K_XL.gguf
+cat > /Modelfile-qwen << 'EOF'
+FROM /root/.ollama/Qwen3.5-0.8B-Q4_K_M.gguf
 
 PARAMETER stop "<|im_end|>"
 PARAMETER stop "<|endoftext|>"
 
-# Qwen3.5 thinking mode - set to 0 to disable /think tokens
 PARAMETER temperature 0.6
 PARAMETER top_p 0.95
 PARAMETER top_k 20
@@ -73,6 +77,11 @@ ollama serve &
 OLLAMA_PID=$!
 sleep 10
 
-ollama create qwen3.5-9b-unsloth -f /Modelfile-9b
+if ! ollama list | grep -q "$MODEL_NAME"; then
+  echo "Creating model $MODEL_NAME..."
+  ollama create "$MODEL_NAME" -f /Modelfile-qwen
+else
+  echo "Model $MODEL_NAME already registered, skipping create."
+fi
 
 wait $OLLAMA_PID

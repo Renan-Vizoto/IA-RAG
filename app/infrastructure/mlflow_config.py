@@ -23,22 +23,23 @@ def initialize_training_mlflow():
     return mlflow
 
 
-def start_run():
-    mlflow.start_run()
-
-
-def log_metrics(metrics: dict):
-    for key, value in metrics.items():
-        mlflow.log_metric(key, value)
-
-
-def log_params(params: dict):
-    for key, value in params.items():
-        mlflow.log_param(key, value)
-
-
-def end_run():
-    mlflow.end_run()
+def log_chat_response(
+    response_id: str,
+    session_id: str,
+    model: str,
+    user_message: str,
+    answer: str,
+    metrics: dict,
+):
+    with mlflow.start_run(run_name=response_id):
+        mlflow.set_tag("session_id", session_id)
+        mlflow.set_tag("response_id", response_id)
+        mlflow.log_param("model", model)
+        mlflow.log_param("user_message", user_message[:500])
+        for key, value in metrics.items():
+            if value is not None:
+                mlflow.log_metric(key, value)
+        mlflow.log_text(answer, "answer.txt")
 
 
 mlflow_client = initialize_mlflow()

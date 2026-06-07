@@ -9,6 +9,27 @@ class SearchService:
         self._embbed = embbeder
 
     def search(self, text: str) -> str:
-        """Busca na base de governança do pipeline Dutch Energy."""
+        """Busca semântica na governança do pipeline e nos metadados MLflow indexados."""
         vector = self._embbed.embbed_it([text])
-        return self._repo.search(settings.governance_collection, vector)
+
+        gov_hits = self._repo.search(
+            settings.governance_collection,
+            vector,
+            limit=5,
+            output_fields=["text", "source"],
+        )
+        mlflow_hits = self._repo.search(
+            settings.mlflow_metadata_collection,
+            vector,
+            limit=5,
+            output_fields=["text", "source", "run_id"],
+        )
+
+        merged = []
+        for hit_list in gov_hits + mlflow_hits:
+            for hit in hit_list:
+                merged.append(hit)
+
+        merged.sort(key=lambda h: h.get("distance", 1.0))
+        top = merged[:5]
+        return [top]
