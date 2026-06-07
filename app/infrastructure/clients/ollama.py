@@ -1,9 +1,15 @@
 from langchain_ollama import ChatOllama
+
 from app.infrastructure.configs import settings
 
-client = ChatOllama(
-    model=settings.OLLAMA_MODEL,
-    base_url=settings.OLLAMA_URL,
-    temperature=settings.OLLAMA_TEMPERATURE,
-    num_predict=settings.OLLAMA_NUM_PREDICT,
-)
+
+def create_chat_model(model_name: str) -> ChatOllama:
+    return ChatOllama(
+        model=model_name,
+        base_url=settings.OLLAMA_URL,
+        temperature=settings.OLLAMA_TEMPERATURE,
+        num_predict=settings.OLLAMA_NUM_PREDICT,
+    )
+
+
+client = create_chat_model(settings.OLLAMA_MODEL)

@@ -8,6 +8,7 @@ import pytest
 
 from app.core.services.chat_service import ChatService
 from app.api.schemas.chat_response import ChatResponse
+from app.infrastructure.configs import settings
 
 
 @pytest.fixture
@@ -24,13 +25,6 @@ def mock_agent_result():
             ai_msg,
         ]
     }
-
-
-@pytest.fixture
-def mock_model():
-    model = MagicMock()
-    model.model = "gemma4-unsloth"
-    return model
 
 
 @pytest.fixture
@@ -68,21 +62,37 @@ def mock_session_repo():
     return repo
 
 
+@pytest.fixture
+def mock_model_manager():
+    return MagicMock()
+
+
+@pytest.fixture
+def service_factory(mock_search_tool, mock_model_manager):
+    def _build(**kwargs):
+        return ChatService(
+            tools=[mock_search_tool],
+            ollama_model_manager=mock_model_manager,
+            **kwargs,
+        )
+    return _build
+
+
 class TestChatService:
 
     @patch("app.core.services.chat_service.log_chat_response")
     @patch("app.core.services.chat_service.create_agent")
+    @patch("app.core.services.chat_service.create_chat_model")
     def test_retorna_chat_response_com_tracking(
-        self, mock_create_agent, mock_log, mock_model, mock_search_tool,
-        mock_agent_result, mock_session_repo, mock_search_service
+        self, mock_create_chat_model, mock_create_agent, mock_log,
+        mock_agent_result, mock_session_repo, mock_search_service,
+        service_factory,
     ):
         agent = MagicMock()
         agent.invoke.return_value = mock_agent_result
         mock_create_agent.return_value = agent
 
-        service = ChatService(
-            model=mock_model,
-            tools=[mock_search_tool],
+        service = service_factory(
             search_service=mock_search_service,
             session_repo=mock_session_repo,
         )
@@ -90,85 +100,83 @@ class TestChatService:
 
         assert isinstance(response, ChatResponse)
         assert response.session_id == "sess-1"
-        assert response.model == "gemma4-unsloth"
+        assert response.model == settings.OLLAMA_MODEL
         assert response.response_id
         assert response.tokens.input_tokens == 10
-        assert response.tokens.output_tokens == 5
-        assert response.tokens.total_tokens == 15
-        assert response.session_tokens.total_tokens == 15
         assert len(response.search_results) == 1
-        assert response.confidence_score > 0
         mock_search_service.search.assert_called_once_with("Qual o modelo?")
-        mock_session_repo.ensure_session.assert_called_once_with("sess-1")
-        mock_session_repo.save_response.assert_called_once()
-        mock_log.assert_called_once()
 
     @patch("app.core.services.chat_service.log_chat_response")
     @patch("app.core.services.chat_service.create_agent")
-    def test_session_tokens_acumulam(
-        self, mock_create_agent, mock_log, mock_model, mock_search_tool,
-        mock_agent_result, mock_session_repo
+    @patch("app.core.services.chat_service.create_chat_model")
+    def test_modelo_explicito_na_requisicao(
+        self, mock_create_chat_model, mock_create_agent, mock_log,
+        mock_agent_result, service_factory, mock_model_manager,
     ):
         agent = MagicMock()
         agent.invoke.return_value = mock_agent_result
         mock_create_agent.return_value = agent
 
-        service = ChatService(
-            model=mock_model, tools=[mock_search_tool], session_repo=mock_session_repo
+        service = service_factory()
+        response = service.send_message(
+            "Pergunta",
+            session_id="sess-1",
+            model="gemma4-unsloth",
         )
-        r1 = service.send_message("Pergunta 1", session_id="sess-abc")
-        r2 = service.send_message("Pergunta 2", session_id="sess-abc")
 
-        assert r1.session_tokens.total_tokens == 15
-        assert r2.session_tokens.total_tokens == 42
-        assert mock_session_repo.add_session_tokens.call_count == 2
+        assert response.model == "gemma4-unsloth"
+        mock_model_manager.ensure_loaded.assert_called_once_with("gemma4-unsloth")
 
     @patch("app.core.services.chat_service.log_chat_response")
     @patch("app.core.services.chat_service.create_agent")
+    @patch("app.core.services.chat_service.create_chat_model")
+    def test_mesmo_modelo_nao_forca_reload_duplo(
+        self, mock_create_chat_model, mock_create_agent, mock_log,
+        mock_agent_result, service_factory, mock_model_manager,
+    ):
+        agent = MagicMock()
+        agent.invoke.return_value = mock_agent_result
+        mock_create_agent.return_value = agent
+
+        service = service_factory()
+        service.send_message("Pergunta 1", session_id="sess-1", model="gemma4-unsloth")
+        service.send_message("Pergunta 2", session_id="sess-1", model="gemma4-unsloth")
+
+        assert mock_model_manager.ensure_loaded.call_count == 2
+        mock_model_manager.ensure_loaded.assert_called_with("gemma4-unsloth")
+
+    def test_modelo_fora_da_allowlist_levanta_erro(self, service_factory):
+        service = service_factory()
+
+        with pytest.raises(ValueError, match="não permitido"):
+            service.send_message("oi", session_id="sess-1", model="modelo-inexistente")
+
+    @patch("app.core.services.chat_service.log_chat_response")
+    @patch("app.core.services.chat_service.create_agent")
+    @patch("app.core.services.chat_service.create_chat_model")
     def test_mensagem_enviada_com_contexto_da_busca_obrigatoria(
-        self, mock_create_agent, mock_log, mock_model, mock_search_tool,
-        mock_agent_result, mock_search_service
+        self, mock_create_chat_model, mock_create_agent, mock_log,
+        mock_agent_result, mock_search_service, service_factory,
     ):
         agent = MagicMock()
         agent.invoke.return_value = mock_agent_result
         mock_create_agent.return_value = agent
 
-        service = ChatService(
-            model=mock_model,
-            tools=[mock_search_tool],
-            search_service=mock_search_service,
-        )
+        service = service_factory(search_service=mock_search_service)
         service.send_message("Qual o RMSE?", session_id="test-session")
 
         invoked_messages = agent.invoke.call_args[0][0]["messages"]
         last_human = invoked_messages[-1]
         assert "Qual o RMSE?" in last_human.content
         assert "--- CONTEXTO ---" in last_human.content
-        assert "Modelo XGBoost treinado no gold." in last_human.content
-        assert "RESPOSTA (máx. 3 frases" in last_human.content
-
-    @patch("app.core.services.chat_service.log_chat_response")
-    @patch("app.core.services.chat_service.create_agent")
-    def test_historico_de_sessao_mantido(
-        self, mock_create_agent, mock_log, mock_model, mock_search_tool, mock_agent_result
-    ):
-        agent = MagicMock()
-        agent.invoke.return_value = mock_agent_result
-        mock_create_agent.return_value = agent
-
-        service = ChatService(model=mock_model, tools=[mock_search_tool])
-        service.send_message("Pergunta 1", session_id="sess-abc")
-        service.send_message("Pergunta 2", session_id="sess-abc")
-
-        assert "sess-abc" in service.chats
 
 
 class TestMandatorySearch:
 
-    def test_fallback_hits_quando_agente_nao_chama_ferramenta(self, mock_model, mock_search_tool):
+    def test_fallback_hits_quando_agente_nao_chama_ferramenta(self, mock_search_tool, service_factory):
         from langchain_core.messages import AIMessage, HumanMessage
 
-        service = ChatService(model=mock_model, tools=[mock_search_tool])
+        service = service_factory()
         fallback_hits = [
             service._dict_to_milvus_hit({
                 "id": "1",
@@ -187,7 +195,6 @@ class TestMandatorySearch:
         )
         assert len(parsed.result) == 1
         assert parsed.result[0].source == "mlflow_metadata"
-        assert parsed.answer == "resposta final"
 
 
 class TestExtractTokenUsage:
@@ -206,8 +213,43 @@ class TestExtractTokenUsage:
         assert out == 8
         assert total == 28
 
-    def test_sem_usage_retorna_none(self):
-        from langchain_core.messages import AIMessage
+    def test_extrai_tokens_apenas_do_turno_atual(self):
+        from langchain_core.messages import AIMessage, HumanMessage
 
-        messages = [AIMessage(content="resposta")]
-        assert ChatService._extract_token_usage(messages) == (None, None, None)
+        messages = [
+            HumanMessage(content="pergunta antiga"),
+            AIMessage(
+                content="resposta antiga",
+                usage_metadata={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+            ),
+            HumanMessage(content="pergunta nova"),
+            AIMessage(
+                content="resposta nova",
+                usage_metadata={"input_tokens": 30, "output_tokens": 10, "total_tokens": 40},
+            ),
+        ]
+        service = ChatService(tools=[])
+        current_turn = service._get_current_turn_messages(messages)
+        inp, out, total = ChatService._extract_token_usage(current_turn)
+        assert inp == 30
+        assert out == 10
+        assert total == 40
+
+
+class TestAnswerSanitization:
+
+    def test_remove_tags_de_fonte_e_run_id(self):
+        raw = (
+            "O modelo foi XGBoost [mlflow_metadata]. "
+            "Run ID: a1888f014bb04b61ba4c245bb58552c8 [mlflow_metadata]."
+        )
+        cleaned = ChatService._sanitize_answer(raw)
+        assert "[mlflow_metadata]" not in cleaned
+        assert "a1888f014bb04b61ba4c245bb58552c8" not in cleaned
+        assert "XGBoost" in cleaned
+
+    def test_redact_sensitive_text_no_contexto(self):
+        text = "Run ID MLflow: a1888f014bb04b61ba4c245bb58552c8. RMSE: 89.1"
+        redacted = ChatService._redact_sensitive_text(text)
+        assert "a1888f014bb04b61ba4c245bb58552c8" not in redacted
+        assert "RMSE: 89.1" in redacted

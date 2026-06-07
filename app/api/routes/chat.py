@@ -8,12 +8,13 @@ from app.core.services.search_service import SearchService
 from app.infrastructure.implementations.embbeding.MiniLML12_embbeding import MiniLML12_Embbeding
 from app.infrastructure.repositories.milvus_repo import MilvusRepo
 from app.infrastructure.repositories.chat_session_repo import ChatSessionRepository
-from app.infrastructure.clients import ollama, milvus_client
+from app.infrastructure.clients import milvus_client
 from langchain_core.tools import tool
 from app.api.schemas.chat_response import ChatResponse, ChatTraceResponse, TokenUsage, MilvusHitTrace
 
 class ChatRequest(BaseModel):
     message: str
+    model: str | None = None
 
 router = APIRouter(
     prefix="/chat",
@@ -34,8 +35,7 @@ def init_chat_dependencies(chat_session_repo: ChatSessionRepository):
     global session_repo, chatService
     session_repo = chat_session_repo
     chatService = ChatService(
-        ollama.client,
-        [search_tool],
+        tools=[search_tool],
         search_service=searchService,
         session_repo=session_repo,
     )
@@ -43,8 +43,7 @@ def init_chat_dependencies(chat_session_repo: ChatSessionRepository):
 
 if chatService is None:
     chatService = ChatService(
-        ollama.client,
-        [search_tool],
+        tools=[search_tool],
         search_service=searchService,
     )
 
@@ -64,7 +63,14 @@ def send_message(
             samesite="lax",
             max_age=60 * 60 * 24 * 7
         )
-    return chatService.send_message(request.message, session_id)
+    try:
+        return chatService.send_message(
+            request.message,
+            session_id,
+            model=request.model,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/trace/{response_id}", response_model=ChatTraceResponse, summary="Rastreio da resposta")

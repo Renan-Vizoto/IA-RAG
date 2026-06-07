@@ -93,6 +93,97 @@ graph TB
 
 ---
 
+## 🚀 Como iniciar o projeto (Makefile)
+
+O repositório inclui um `Makefile` na raiz para facilitar o setup e a execução via Docker Compose.
+
+### Pré-requisitos
+
+- Docker e Docker Compose
+- `make`
+- (Opcional) `curl` para download dos modelos GGUF
+
+### Primeira execução
+
+```bash
+# 1. Baixar modelos (embedding + Ollama) para volumes/
+make setup-all
+
+# 2. (Opcional) Copiar variáveis de ambiente
+cp .env.example .env
+
+# 3. Subir toda a stack
+make up
+```
+
+Na primeira vez, o download dos modelos pode demorar. O Ollama sobe por padrão com **Qwen3.5 0.8B** (`qwen3.5-0.8b-unsloth`).
+
+### GPU (NVIDIA / AMD / CPU)
+
+O Makefile detecta a GPU automaticamente. Para forçar um perfil:
+
+```bash
+make gpu-info          # mostra perfil detectado e arquivos compose usados
+make up                # auto: nvidia → amd → cpu
+make up GPU=nvidia     # docker-compose.nvidia.yml
+make up GPU=amd        # docker-compose.amd.yml (ROCm)
+make up GPU=cpu        # sem override de GPU
+```
+
+Atalhos: `make up-nvidia`, `make up-amd`, `make up-cpu`.
+
+### Modelo de inferência
+
+O modelo padrão é configurável via `.env` ou na linha de comando:
+
+```bash
+make up OLLAMA_MODEL=qwen3.5-0.8b-unsloth
+```
+
+Na API, é possível escolher outro modelo permitido por requisição:
+
+```bash
+curl -X POST http://localhost:3333/chat/message \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Qual modelo foi treinado?", "model": "gemma4-unsloth"}'
+```
+
+### Pipeline de treinamento (Dutch Energy)
+
+Coloque os CSVs do Kaggle em `notebooks/data/` e execute:
+
+```bash
+make train              # bronze → silver → gold → XGBoost + MLflow
+make train-force        # reprocessa silver/gold e retreina
+```
+
+### Comandos úteis
+
+| Comando | Descrição |
+|---------|-----------|
+| `make help` | Lista todos os targets disponíveis |
+| `make down` | Para todos os serviços |
+| `make restart` | Reinicia a stack |
+| `make logs` | Acompanha logs dos containers |
+| `make ps` | Status dos containers |
+| `make setup-embeddings` | Baixa apenas o modelo de embedding |
+| `make setup-ollama-qwen` | Baixa apenas o GGUF do Qwen 0.8B |
+| `make setup-ollama-gemma` | Baixa apenas o GGUF do Gemma |
+| `make test-unit` | Roda testes unitários |
+| `make clean-volumes` | Remove volumes gerados (destrutivo) |
+
+### Portas principais
+
+| Serviço | URL |
+|---------|-----|
+| API FastAPI | http://localhost:3333 |
+| Ollama | http://localhost:11435 |
+| MLflow | http://localhost:5001 |
+| MinIO Console | http://localhost:9001 |
+| Attu (Milvus UI) | http://localhost:3005 |
+
+---
+
 ## 📌 Links Úteis
 
 - **Dataset**: [Energy consumption of the Netherlands](https://www.kaggle.com/datasets/lucabasa/dutch-energy)

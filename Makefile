@@ -13,8 +13,11 @@ ROOT           := $(CURDIR)
 VOLUMES        := $(ROOT)/volumes
 OLLAMA_DIR     := $(VOLUMES)/ollama
 EMBEDDING_DIR  := $(VOLUMES)/embeddings/paraphrase-multilingual-MiniLM-L12-v2
-OLLAMA_MODEL   ?= gemma4-unsloth
+OLLAMA_MODEL   ?= qwen3.5-0.8b-unsloth
 GPU            ?= auto
+DATA_DIR       ?= notebooks/data
+PIPELINE_FLAGS ?=
+PYTHON         := $(ROOT)/.venv/bin/python
 
 # auto | cpu | nvidia | amd
 COMPOSE_GPU := $(shell \
@@ -37,6 +40,7 @@ COMPOSE        := docker compose $(COMPOSE_FILES)
 .PHONY: help gpu-info up up-cpu up-nvidia up-amd down restart build pull logs ps \
         setup setup-all setup-embeddings \
         setup-ollama setup-ollama-gemma setup-ollama-qwen setup-ollama-9b \
+        train train-force train-local \
         test test-unit clean-volumes
 
 help: ## Show available targets
@@ -95,16 +99,31 @@ setup-all: setup setup-ollama-qwen ## Download embedding + gemma + qwen 0.8B
 setup-embeddings: ## Download sentence-transformers model to volumes/embeddings/
 	@bash embedding-setup.sh
 
-setup-ollama: setup-ollama-gemma setup-ollama-qwen ## Download all auto-fetch Ollama GGUFs
-
 setup-ollama-gemma: ## Download gemma-4-E2B-it-Q4_K_M.gguf
 	@bash scripts/download-ollama-gguf.sh gemma
 
 setup-ollama-qwen: ## Download Qwen3.5-0.8B-Q4_K_M.gguf
 	@bash scripts/download-ollama-gguf.sh qwen
 
-setup-ollama-9b: ## Verify Qwen3.5-9B GGUF is present (manual download)
-	@bash scripts/download-ollama-gguf.sh qwen-9b
+# ---------------------------------------------------------------------------
+# Dutch Energy pipeline (bronze → silver → gold → XGBoost + MLflow)
+# ---------------------------------------------------------------------------
+
+train: ## Run full pipeline in Docker (requires: make up + CSVs in DATA_DIR)
+	@test -d "$(ROOT)/$(DATA_DIR)" || { \
+		echo "Dataset not found at $(DATA_DIR)."; \
+		echo "Download from Kaggle and place CSVs in $(ROOT)/$(DATA_DIR)/"; \
+		exit 1; \
+	}
+	@$(COMPOSE) ps --status running --services api 2>/dev/null | grep -q api || { \
+		echo "API container is not running. Start the stack with: make up"; \
+		exit 1; \
+	}
+	$(COMPOSE) exec -T api python -m app.pipeline.run_dutch_energy_pipeline \
+		--data-dir $(DATA_DIR) $(PIPELINE_FLAGS)
+
+train-force: ## Re-process silver/gold and retrain (PIPELINE_FLAGS=--force)
+	$(MAKE) train PIPELINE_FLAGS=--force
 
 # ---------------------------------------------------------------------------
 # Dev / test

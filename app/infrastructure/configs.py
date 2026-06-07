@@ -1,7 +1,6 @@
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
-from os import getenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_EMBEDDING_PATH = (
@@ -10,40 +9,47 @@ _DEFAULT_EMBEDDING_PATH = (
 
 
 class Settings(BaseSettings):
-    MINIO_URL: str = getenv("MINIO_URL", "localhost:9000")
-    MILVUS_URL: str = getenv("MILVUS_URL", "http://localhost:19530")
+    model_config = SettingsConfigDict(
+        env_file=str(_REPO_ROOT / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    MINIO_URL: str = "localhost:9000"
+    MILVUS_URL: str = "http://localhost:19530"
     governance_collection: str = "governance"
     mlflow_metadata_collection: str = "mlflow_metadata"
-    chunk_size: int = getenv("CHUNK_SIZE", 500)
-    chunk_overlap: int = getenv("CHUNK_OVERLAP", 20)
-    think: bool = getenv("ENABLE_THINK", True)
-    OLLAMA_URL: str = getenv("OLLAMA_URL", "http://localhost:11435")
-    OLLAMA_MODEL: str = getenv("OLLAMA_MODEL", "gemma4-unsloth")
-    OLLAMA_TEMPERATURE: float = float(getenv("OLLAMA_TEMPERATURE", "0.2"))
-    OLLAMA_NUM_PREDICT: int = int(getenv("OLLAMA_NUM_PREDICT", "384"))
-
-    RAG_MAX_CONTEXT_CHUNKS: int = int(getenv("RAG_MAX_CONTEXT_CHUNKS", "3"))
-    RAG_MAX_CHUNK_CHARS: int = int(getenv("RAG_MAX_CHUNK_CHARS", "400"))
-
-    EMBEDDING_MODEL_PATH: str = getenv(
-        "EMBEDDING_MODEL_PATH",
-        str(_DEFAULT_EMBEDDING_PATH),
+    chunk_size: int = 500
+    chunk_overlap: int = 20
+    think: bool = True
+    OLLAMA_URL: str = "http://localhost:11435"
+    OLLAMA_MODEL: str = "qwen3.5-0.8b-unsloth"
+    OLLAMA_ALLOWED_MODELS: str = (
+        "qwen3.5-0.8b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth"
     )
-    EMBEDDING_MODEL_HF_ID: str = getenv(
-        "EMBEDDING_MODEL_HF_ID",
-        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    OLLAMA_TEMPERATURE: float = 0.2
+    OLLAMA_NUM_PREDICT: int = 384
+
+    RAG_MAX_CONTEXT_CHUNKS: int = 3
+    RAG_MAX_CHUNK_CHARS: int = 400
+
+    EMBEDDING_MODEL_PATH: str = str(_DEFAULT_EMBEDDING_PATH)
+    EMBEDDING_MODEL_HF_ID: str = (
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
     EMBEDDING_DIMENSION: int = 384
 
-    MLFLOW_TRACKING_URI: str = getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
+    MLFLOW_TRACKING_URI: str = "http://localhost:5001"
     MLFLOW_EXPERIMENT_TRAINING: str = "dutch-energy-training"
-    MLFLOW_S3_ENDPOINT_URL: str = getenv("MLFLOW_S3_ENDPOINT_URL", "http://localhost:9000")
-    AWS_ACCESS_KEY_ID: str = getenv("AWS_ACCESS_KEY_ID", "minioadmin")
-    AWS_SECRET_ACCESS_KEY: str = getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
+    MLFLOW_S3_ENDPOINT_URL: str = "http://localhost:9000"
+    AWS_ACCESS_KEY_ID: str = "minioadmin"
+    AWS_SECRET_ACCESS_KEY: str = "minioadmin"
 
-    CHAT_DATABASE_URL: str = getenv(
-        "CHAT_DATABASE_URL",
-        "postgresql://mlflow:mlflow@localhost:5432/rag",
-    )
+    CHAT_DATABASE_URL: str = "postgresql://mlflow:mlflow@localhost:5432/rag"
+
+    @property
+    def ollama_allowed_models(self) -> list[str]:
+        return [m.strip() for m in self.OLLAMA_ALLOWED_MODELS.split(",") if m.strip()]
+
 
 settings = Settings()

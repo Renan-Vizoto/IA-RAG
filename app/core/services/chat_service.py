@@ -3,12 +3,13 @@ import logging
 import time
 import re
 import uuid
-from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain.agents import create_agent
 from app.infrastructure.mlflow_config import log_chat_response
 from app.infrastructure.configs import settings
 from app.core.prompt_loader import load_prompt
+from app.infrastructure.clients.ollama import create_chat_model
+from app.infrastructure.clients.ollama_model_manager import OllamaModelManager, model_manager
 from app.api.schemas.chat_response import ChatResponse, TokenUsage
 from app.infrastructure.repositories.chat_session_repo import ChatSessionRepository
 from pydantic import BaseModel
@@ -16,6 +17,15 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 Message = Union[HumanMessage, SystemMessage]
+
+_RUN_ID_LINE_PATTERN = re.compile(
+    r"(?i)run\s*id(?:\s*mlflow)?\s*:\s*[a-f0-9]{32}\.?\s*",
+)
+_HEX_ID_PATTERN = re.compile(r"\b[a-f0-9]{32}\b", re.IGNORECASE)
+_SOURCE_TAG_PATTERN = re.compile(
+    r"\s*\[(?:silver_governance|gold_governance|mlflow_report|mlflow_metadata)\]",
+    re.IGNORECASE,
+)
 
 class MilvusHit(BaseModel):
     id: str
@@ -39,19 +49,38 @@ class ChatService:
 
     def __init__(
         self,
-        model: ChatOllama,
         tools: List[Callable[..., Any]],
         search_service=None,
         session_repo: Optional[ChatSessionRepository] = None,
+        ollama_model_manager: OllamaModelManager | None = None,
     ):
-        self._model_name = getattr(model, "model", None) or settings.OLLAMA_MODEL
-        self._agent_executor = create_agent(
-            model=model,
-            tools=tools,
-            system_prompt=load_prompt("rag_system"),
-        )
+        self._default_model = settings.OLLAMA_MODEL
+        self._allowed_models = set(settings.ollama_allowed_models)
+        self._agents: dict[str, Any] = {}
+        self._tools = tools
+        self._system_prompt = load_prompt("rag_system")
         self._search_service = search_service
         self._session_repo = session_repo
+        self._model_manager = ollama_model_manager or model_manager
+
+    def _resolve_model(self, model: str | None) -> str:
+        resolved = model or self._default_model
+        if resolved not in self._allowed_models:
+            allowed = ", ".join(sorted(self._allowed_models))
+            raise ValueError(
+                f"Modelo '{resolved}' não permitido. Modelos disponíveis: {allowed}"
+            )
+        return resolved
+
+    def _get_agent(self, model_name: str):
+        if model_name not in self._agents:
+            llm = create_chat_model(model_name)
+            self._agents[model_name] = create_agent(
+                model=llm,
+                tools=self._tools,
+                system_prompt=self._system_prompt,
+            )
+        return self._agents[model_name]
 
     def _get_or_create_chat(self, session_id: str) -> List[Message]:
         chat = self.chats.get(session_id)
@@ -71,6 +100,7 @@ class ChatService:
         total_tokens: int | None,
         response_time: float,
         confidence_score: float,
+        model_name: str,
     ) -> TokenUsage:
         default_session = TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0)
         if not self._session_repo:
@@ -85,7 +115,7 @@ class ChatService:
             self._session_repo.save_response(
                 response_id=response_id,
                 session_id=session_id,
-                model=self._model_name,
+                model=model_name,
                 user_message=message,
                 answer=parsed_response.answer,
                 input_tokens=input_tokens,
@@ -110,9 +140,18 @@ class ChatService:
             logger.warning(f"[CHAT_DB] Falha ao persistir sessão: {e}")
             return default_session
 
-    def send_message(self, message: str, session_id: str) -> ChatResponse:
+    def send_message(
+        self,
+        message: str,
+        session_id: str,
+        model: str | None = None,
+    ) -> ChatResponse:
         response_id = str(uuid.uuid4())
         start_time = time.time()
+        resolved_model = self._resolve_model(model)
+
+        self._model_manager.ensure_loaded(resolved_model)
+        agent = self._get_agent(resolved_model)
 
         chat_history = self._get_or_create_chat(session_id)
 
@@ -127,7 +166,7 @@ class ChatService:
         user_content = self._build_user_message(message, presearch_hits)
         messages = chat_history + [HumanMessage(content=user_content)]
 
-        result = self._agent_executor.invoke({
+        result = agent.invoke({
             "messages": messages
         })
 
@@ -141,8 +180,11 @@ class ChatService:
             avg_distance = sum([r.distance or 0 for r in parsed_response.result]) / len(parsed_response.result)
             confidence_score = max(0.0, min(1.0, 1.0 - avg_distance))
 
-        input_tokens, output_tokens, total_tokens = self._extract_token_usage(
+        current_turn_messages = self._get_current_turn_messages(
             result.get("messages", [])
+        )
+        input_tokens, output_tokens, total_tokens = self._extract_token_usage(
+            current_turn_messages
         )
 
         response_tokens = TokenUsage(
@@ -161,12 +203,13 @@ class ChatService:
             total_tokens=total_tokens,
             response_time=response_time,
             confidence_score=confidence_score,
+            model_name=resolved_model,
         )
 
         log_chat_response(
             response_id=response_id,
             session_id=session_id,
-            model=self._model_name,
+            model=resolved_model,
             user_message=message,
             answer=parsed_response.answer,
             metrics={
@@ -192,10 +235,26 @@ class ChatService:
             session_id=session_id,
             message_count=len(self.chats[session_id]),
             response_id=response_id,
-            model=self._model_name,
+            model=resolved_model,
             tokens=response_tokens,
             session_tokens=session_tokens,
         )
+
+    @staticmethod
+    def _redact_sensitive_text(text: str) -> str:
+        text = _RUN_ID_LINE_PATTERN.sub("", text)
+        text = _HEX_ID_PATTERN.sub("", text)
+        text = re.sub(r"\s{2,}", " ", text)
+        return text.strip()
+
+    @staticmethod
+    def _sanitize_answer(answer: str) -> str:
+        answer = _SOURCE_TAG_PATTERN.sub("", answer)
+        answer = _RUN_ID_LINE_PATTERN.sub("", answer)
+        answer = _HEX_ID_PATTERN.sub("", answer)
+        answer = re.sub(r"\s{2,}", " ", answer)
+        answer = re.sub(r"\s+([.,;])", r"\1", answer)
+        return answer.strip()
 
     @staticmethod
     def _extract_token_usage(messages: List[Any]) -> tuple[int | None, int | None, int | None]:
@@ -301,7 +360,8 @@ class ChatService:
         for index, hit in enumerate(limited, start=1):
             source = hit.source or "desconhecida"
             text = self._truncate_chunk_text(hit.text, settings.RAG_MAX_CHUNK_CHARS)
-            lines.append(f"[{index}] fonte={source}\n{text}")
+            text = self._redact_sensitive_text(text)
+            lines.append(f"[{index}]\n{text}")
         return "\n\n".join(lines)
 
     def _build_user_message(self, message: str, hits: list[MilvusHit]) -> str:
@@ -311,7 +371,7 @@ class ChatService:
             f"{context}\n"
             "--- FIM ---\n\n"
             f"PERGUNTA: {message.strip()}\n\n"
-            "RESPOSTA (máx. 3 frases, só com base no CONTEXTO):"
+            "RESPOSTA (tom cordial, máx. 5 frases, sem ids técnicos nem tags de fonte):"
         )
 
     def _parse_tool_content(self, content_str: str) -> list:
@@ -360,6 +420,7 @@ class ChatService:
         answer = re.sub(r"<\|channel>thought\n.*?(?=\S|\Z)", "", raw_output, flags=re.DOTALL)
         qwen_tag = "redacted_thinking"
         answer = re.sub(rf"<{qwen_tag}>.*?</{qwen_tag}>", "", answer, flags=re.DOTALL).strip()
+        answer = self._sanitize_answer(answer)
 
         return ParsedResponse(
             thinking=thinking,
