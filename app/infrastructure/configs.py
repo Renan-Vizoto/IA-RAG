@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     think: bool = getenv("ENABLE_THINK", True)
     OLLAMA_URL: str = getenv("OLLAMA_URL", "http://localhost:11435")
     OLLAMA_MODEL: str = getenv("OLLAMA_MODEL", "gemma4-unsloth")
+    OLLAMA_TEMPERATURE: float = float(getenv("OLLAMA_TEMPERATURE", "0.2"))
+    OLLAMA_NUM_PREDICT: int = int(getenv("OLLAMA_NUM_PREDICT", "384"))
+
+    RAG_MAX_CONTEXT_CHUNKS: int = int(getenv("RAG_MAX_CONTEXT_CHUNKS", "3"))
+    RAG_MAX_CHUNK_CHARS: int = int(getenv("RAG_MAX_CHUNK_CHARS", "400"))
 
     EMBEDDING_MODEL_PATH: str = getenv(
         "EMBEDDING_MODEL_PATH",

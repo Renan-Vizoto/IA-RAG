@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, Tool
 from langchain.agents import create_agent
 from app.infrastructure.mlflow_config import log_chat_response
 from app.infrastructure.configs import settings
+from app.core.prompt_loader import load_prompt
 from app.api.schemas.chat_response import ChatResponse, TokenUsage
 from app.infrastructure.repositories.chat_session_repo import ChatSessionRepository
 from pydantic import BaseModel
@@ -47,17 +48,7 @@ class ChatService:
         self._agent_executor = create_agent(
             model=model,
             tools=tools,
-            system_prompt=(
-                "Você é um assistente de governança do pipeline de machine learning Dutch Energy. "
-                "Sempre use a ferramenta de busca antes de responder. "
-                "A busca vetorial retorna documentos de governança e metadados de treinamento MLflow. "
-                "Fontes disponíveis: silver_governance e gold_governance (pipeline bronze/silver/gold), "
-                "mlflow_report (relatório markdown do treinamento) e mlflow_metadata "
-                "(métricas, hiperparâmetros e run IDs dos experimentos no PostgreSQL). "
-                "Responda em português, com base nos dados recuperados sobre ingestão (bronze), "
-                "processamento (silver), split de dados (gold) e treinamento do modelo. "
-                "Se não encontrar informação relevante, diga claramente que não há dados disponíveis."
-            )
+            system_prompt=load_prompt("rag_system"),
         )
         self._search_service = search_service
         self._session_repo = session_repo
@@ -124,13 +115,23 @@ class ChatService:
         start_time = time.time()
 
         chat_history = self._get_or_create_chat(session_id)
-        messages = chat_history + [HumanMessage(content=message)]
+
+        presearch_hits: list[MilvusHit] = []
+        if self._search_service:
+            try:
+                raw_hits = self._search_service.search(message)
+                presearch_hits = self._hits_from_raw_search(raw_hits)
+            except Exception as e:
+                logger.warning(f"[RAG] Falha na busca vetorial obrigatória: {e}")
+
+        user_content = self._build_user_message(message, presearch_hits)
+        messages = chat_history + [HumanMessage(content=user_content)]
 
         result = self._agent_executor.invoke({
             "messages": messages
         })
 
-        parsed_response = self._parse_agent_output(result)
+        parsed_response = self._parse_agent_output(result, fallback_hits=presearch_hits)
 
         self.chats[session_id] = result.get("messages", messages)
 
@@ -260,6 +261,59 @@ class ChatService:
             return settings.mlflow_metadata_collection
         return settings.governance_collection
 
+    def _dict_to_milvus_hit(self, hit: dict) -> MilvusHit | None:
+        if not isinstance(hit, dict):
+            return None
+        entity = hit.get("entity", {}) if isinstance(hit.get("entity"), dict) else {}
+        text = hit.get("text", "") or entity.get("text", "")
+        if not text:
+            return None
+        source = entity.get("source") or hit.get("source")
+        return MilvusHit(
+            id=str(hit.get("id", "")),
+            distance=float(hit.get("distance", 0.0)),
+            text=str(text),
+            source=source,
+            collection=self._infer_collection(source),
+        )
+
+    def _hits_from_raw_search(self, raw: Any) -> list[MilvusHit]:
+        hits: list[MilvusHit] = []
+        for item in self._flatten_hits(raw if isinstance(raw, list) else [raw]):
+            parsed = self._dict_to_milvus_hit(item)
+            if parsed:
+                hits.append(parsed)
+        return hits
+
+    @staticmethod
+    def _truncate_chunk_text(text: str, max_chars: int) -> str:
+        text = text.strip()
+        if len(text) <= max_chars:
+            return text
+        return text[: max_chars - 3].rstrip() + "..."
+
+    def _format_hits_for_prompt(self, hits: list[MilvusHit]) -> str:
+        if not hits:
+            return "(vazio)"
+
+        limited = hits[: settings.RAG_MAX_CONTEXT_CHUNKS]
+        lines = []
+        for index, hit in enumerate(limited, start=1):
+            source = hit.source or "desconhecida"
+            text = self._truncate_chunk_text(hit.text, settings.RAG_MAX_CHUNK_CHARS)
+            lines.append(f"[{index}] fonte={source}\n{text}")
+        return "\n\n".join(lines)
+
+    def _build_user_message(self, message: str, hits: list[MilvusHit]) -> str:
+        context = self._format_hits_for_prompt(hits)
+        return (
+            "--- CONTEXTO ---\n"
+            f"{context}\n"
+            "--- FIM ---\n\n"
+            f"PERGUNTA: {message.strip()}\n\n"
+            "RESPOSTA (máx. 3 frases, só com base no CONTEXTO):"
+        )
+
     def _parse_tool_content(self, content_str: str) -> list:
         if not content_str:
             return []
@@ -281,26 +335,17 @@ class ChatService:
                 try:
                     res = self._parse_tool_content(getattr(msg, "content", ""))
                     if isinstance(res, list):
-                        flat_res = self._flatten_hits(res)
-                        for hit in flat_res:
-                            if isinstance(hit, dict):
-                                entity = hit.get("entity", {}) if isinstance(hit.get("entity"), dict) else {}
-                                text = hit.get("text", "") or entity.get("text", "")
-                                source = entity.get("source") or hit.get("source")
-                                collection = self._infer_collection(source)
-
-                                search_results.append(MilvusHit(
-                                    id=str(hit.get("id", "")),
-                                    distance=float(hit.get("distance", 0.0)),
-                                    text=str(text),
-                                    source=source,
-                                    collection=collection,
-                                ))
+                        for hit in self._hits_from_raw_search(res):
+                            search_results.append(hit)
                 except Exception as e:
                     print(f"Error parsing tool message: {e}")
         return search_results
 
-    def _parse_agent_output(self, result: dict) -> ParsedResponse:
+    def _parse_agent_output(
+        self,
+        result: dict,
+        fallback_hits: list[MilvusHit] | None = None,
+    ) -> ParsedResponse:
         messages = result.get("messages", [])
         current_turn_msgs = self._get_current_turn_messages(messages)
 
@@ -309,6 +354,8 @@ class ChatService:
 
         thinking = self._extract_thinking(current_turn_msgs)
         search_results = self._extract_search_results(current_turn_msgs)
+        if not search_results and fallback_hits:
+            search_results = fallback_hits
 
         answer = re.sub(r"<\|channel>thought\n.*?(?=\S|\Z)", "", raw_output, flags=re.DOTALL)
         qwen_tag = "redacted_thinking"

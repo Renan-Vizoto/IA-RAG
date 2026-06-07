@@ -12,6 +12,10 @@ services:
       MILVUS_URL: http://milvus-standalone:19530
       OLLAMA_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4-unsloth}
+      OLLAMA_TEMPERATURE: ${OLLAMA_TEMPERATURE:-0.2}
+      OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-384}
+      RAG_MAX_CONTEXT_CHUNKS: ${RAG_MAX_CONTEXT_CHUNKS:-3}
+      RAG_MAX_CHUNK_CHARS: ${RAG_MAX_CHUNK_CHARS:-400}
       MLFLOW_TRACKING_URI: http://mlflow_server:5001
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
       AWS_ACCESS_KEY_ID: minioadmin

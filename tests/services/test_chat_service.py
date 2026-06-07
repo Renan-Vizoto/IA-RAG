@@ -46,6 +46,19 @@ def mock_search_tool():
 
 
 @pytest.fixture
+def mock_search_service():
+    service = MagicMock()
+    service.search.return_value = [[
+        {
+            "id": "hit-1",
+            "distance": 0.12,
+            "entity": {"text": "Modelo XGBoost treinado no gold.", "source": "gold_governance"},
+        }
+    ]]
+    return service
+
+
+@pytest.fixture
 def mock_session_repo():
     repo = MagicMock()
     repo.get_session_tokens.side_effect = [
@@ -61,14 +74,17 @@ class TestChatService:
     @patch("app.core.services.chat_service.create_agent")
     def test_retorna_chat_response_com_tracking(
         self, mock_create_agent, mock_log, mock_model, mock_search_tool,
-        mock_agent_result, mock_session_repo
+        mock_agent_result, mock_session_repo, mock_search_service
     ):
         agent = MagicMock()
         agent.invoke.return_value = mock_agent_result
         mock_create_agent.return_value = agent
 
         service = ChatService(
-            model=mock_model, tools=[mock_search_tool], session_repo=mock_session_repo
+            model=mock_model,
+            tools=[mock_search_tool],
+            search_service=mock_search_service,
+            session_repo=mock_session_repo,
         )
         response = service.send_message("Qual o modelo?", session_id="sess-1")
 
@@ -80,6 +96,9 @@ class TestChatService:
         assert response.tokens.output_tokens == 5
         assert response.tokens.total_tokens == 15
         assert response.session_tokens.total_tokens == 15
+        assert len(response.search_results) == 1
+        assert response.confidence_score > 0
+        mock_search_service.search.assert_called_once_with("Qual o modelo?")
         mock_session_repo.ensure_session.assert_called_once_with("sess-1")
         mock_session_repo.save_response.assert_called_once()
         mock_log.assert_called_once()
@@ -106,19 +125,27 @@ class TestChatService:
 
     @patch("app.core.services.chat_service.log_chat_response")
     @patch("app.core.services.chat_service.create_agent")
-    def test_mensagem_original_enviada_sem_prefixo_mlflow(
-        self, mock_create_agent, mock_log, mock_model, mock_search_tool, mock_agent_result
+    def test_mensagem_enviada_com_contexto_da_busca_obrigatoria(
+        self, mock_create_agent, mock_log, mock_model, mock_search_tool,
+        mock_agent_result, mock_search_service
     ):
         agent = MagicMock()
         agent.invoke.return_value = mock_agent_result
         mock_create_agent.return_value = agent
 
-        service = ChatService(model=mock_model, tools=[mock_search_tool])
+        service = ChatService(
+            model=mock_model,
+            tools=[mock_search_tool],
+            search_service=mock_search_service,
+        )
         service.send_message("Qual o RMSE?", session_id="test-session")
 
         invoked_messages = agent.invoke.call_args[0][0]["messages"]
         last_human = invoked_messages[-1]
-        assert last_human.content == "Qual o RMSE?"
+        assert "Qual o RMSE?" in last_human.content
+        assert "--- CONTEXTO ---" in last_human.content
+        assert "Modelo XGBoost treinado no gold." in last_human.content
+        assert "RESPOSTA (máx. 3 frases" in last_human.content
 
     @patch("app.core.services.chat_service.log_chat_response")
     @patch("app.core.services.chat_service.create_agent")
@@ -134,6 +161,33 @@ class TestChatService:
         service.send_message("Pergunta 2", session_id="sess-abc")
 
         assert "sess-abc" in service.chats
+
+
+class TestMandatorySearch:
+
+    def test_fallback_hits_quando_agente_nao_chama_ferramenta(self, mock_model, mock_search_tool):
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        service = ChatService(model=mock_model, tools=[mock_search_tool])
+        fallback_hits = [
+            service._dict_to_milvus_hit({
+                "id": "1",
+                "distance": 0.2,
+                "entity": {"text": "trecho", "source": "mlflow_metadata"},
+            })
+        ]
+        parsed = service._parse_agent_output(
+            {
+                "messages": [
+                    HumanMessage(content="pergunta"),
+                    AIMessage(content="resposta final"),
+                ]
+            },
+            fallback_hits=fallback_hits,
+        )
+        assert len(parsed.result) == 1
+        assert parsed.result[0].source == "mlflow_metadata"
+        assert parsed.answer == "resposta final"
 
 
 class TestExtractTokenUsage:
