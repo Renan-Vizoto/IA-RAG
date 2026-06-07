@@ -21,14 +21,16 @@ class Settings(BaseSettings):
     mlflow_metadata_collection: str = "mlflow_metadata"
     chunk_size: int = 500
     chunk_overlap: int = 20
-    think: bool = True
+    think: bool = False
     OLLAMA_URL: str = "http://localhost:11435"
     OLLAMA_MODEL: str = "qwen3.5-0.8b-unsloth"
     OLLAMA_ALLOWED_MODELS: str = (
         "qwen3.5-0.8b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth"
     )
     OLLAMA_TEMPERATURE: float = 0.2
-    OLLAMA_NUM_PREDICT: int = 384
+    OLLAMA_NUM_PREDICT: int = 1024
+    OLLAMA_KEEP_ALIVE: str = "30m"
+    OLLAMA_WARMUP_ENABLED: bool = True
 
     RAG_MAX_CONTEXT_CHUNKS: int = 3
     RAG_MAX_CHUNK_CHARS: int = 400

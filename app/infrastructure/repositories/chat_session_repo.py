@@ -1,9 +1,11 @@
 import logging
 from contextlib import contextmanager
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 import psycopg2
 import psycopg2.extras
+from psycopg2 import sql
 
 from app.infrastructure.configs import settings
 
@@ -54,6 +56,37 @@ class ChatSessionRepository:
     def __init__(self, database_url: str | None = None):
         self._database_url = database_url or settings.CHAT_DATABASE_URL
 
+    def _database_name(self) -> str:
+        parsed = urlparse(self._database_url.replace("postgresql://", "postgres://", 1))
+        return (parsed.path or "").lstrip("/")
+
+    def _admin_database_url(self) -> str:
+        parsed = urlparse(self._database_url.replace("postgresql://", "postgres://", 1))
+        db_name = self._database_name()
+        admin_db = "mlflow" if db_name != "mlflow" else "postgres"
+        return urlunparse(parsed._replace(path=f"/{admin_db}"))
+
+    def _ensure_database_exists(self) -> None:
+        db_name = self._database_name()
+        if not db_name:
+            raise ValueError("CHAT_DATABASE_URL sem nome de database.")
+
+        conn = psycopg2.connect(self._admin_database_url())
+        try:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s",
+                    (db_name,),
+                )
+                if cur.fetchone() is None:
+                    cur.execute(
+                        sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name))
+                    )
+                    logger.info("[CHAT_DB] Database '%s' criado.", db_name)
+        finally:
+            conn.close()
+
     @contextmanager
     def _connection(self):
         conn = psycopg2.connect(self._database_url)
@@ -67,6 +100,7 @@ class ChatSessionRepository:
             conn.close()
 
     def init_schema(self):
+        self._ensure_database_exists()
         with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(_SCHEMA_SQL)

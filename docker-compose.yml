@@ -14,7 +14,8 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5-0.8b-unsloth}
       OLLAMA_ALLOWED_MODELS: ${OLLAMA_ALLOWED_MODELS:-qwen3.5-0.8b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth}
       OLLAMA_TEMPERATURE: ${OLLAMA_TEMPERATURE:-0.2}
-      OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-384}
+      OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-128}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
       RAG_MAX_CONTEXT_CHUNKS: ${RAG_MAX_CONTEXT_CHUNKS:-3}
       RAG_MAX_CHUNK_CHARS: ${RAG_MAX_CHUNK_CHARS:-400}
       MLFLOW_TRACKING_URI: http://mlflow_server:5001
@@ -37,6 +38,8 @@ services:
       mlflow:
         condition: service_started
       postgres:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3333/health')"]
@@ -80,7 +83,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./docker/postgres/init-rag-db.sh:/docker-entrypoint-initdb.d/init-rag-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mlflow -d mlflow"]
       interval: 5s
@@ -181,13 +183,24 @@ services:
     environment:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5-0.8b-unsloth}
       OLLAMA_ALLOWED_MODELS: ${OLLAMA_ALLOWED_MODELS:-qwen3.5-0.8b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      OLLAMA_WARMUP_ENABLED: ${OLLAMA_WARMUP_ENABLED:-true}
+      OLLAMA_WARMUP_TIMEOUT: ${OLLAMA_WARMUP_TIMEOUT:-360}
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/ollama:/root/.ollama
       - ./ollama-entrypoint.sh:/ollama-entrypoint.sh:ro
       - ./ollama-setup.sh:/ollama-setup.sh:ro
       - ./ollama-setup-qwen.sh:/ollama-setup-qwen.sh:ro
       - ./ollama-setup-9b.sh:/ollama-setup-9b.sh:ro
+      - ./ollama-warmup.sh:/ollama-warmup.sh:ro
+      - ./docker/ollama-healthcheck.sh:/ollama-healthcheck.sh:ro
     entrypoint: ["/bin/bash", "/ollama-entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "bash", "/ollama-healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
     networks:
       - rag-network
     restart: no

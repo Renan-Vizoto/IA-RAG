@@ -26,6 +26,23 @@ _SOURCE_TAG_PATTERN = re.compile(
     r"\s*\[(?:silver_governance|gold_governance|mlflow_report|mlflow_metadata)\]",
     re.IGNORECASE,
 )
+_PIPELINE_SEARCH_PATTERN = re.compile(
+    r"modelo|métric|metric|rmse|mae|r²|r2|trein|pipeline|xgboost|feature|hiper|"
+    r"gold|silver|bronze|mlflow|consume|target|dados|limpos|limpeza|dataset",
+    re.IGNORECASE,
+)
+_SEARCH_RETRY_NUDGE_PREFIX = "INSTRUÇÃO INTERNA: chame a ferramenta search"
+_BOGUS_TOOL_ANSWERS = frozenset({"search"})
+_QWEN_THINKING_TAGS = ("think", "redacted_thinking")
+_GEMMA_THOUGHT_PATTERN = re.compile(
+    r"<\|channel>thought\n.*?(?:\n\n|\Z)",
+    re.DOTALL,
+)
+_QWEN_TOOL_CALL_PATTERN = re.compile(r"<tool_call>.*?</tool_call>", re.DOTALL)
+_GEMMA_TOOL_CALL_PATTERN = re.compile(
+    r"<\|tool_call>.*?<tool_call\|>",
+    re.DOTALL,
+)
 
 class MilvusHit(BaseModel):
     id: str
@@ -50,7 +67,6 @@ class ChatService:
     def __init__(
         self,
         tools: List[Callable[..., Any]],
-        search_service=None,
         session_repo: Optional[ChatSessionRepository] = None,
         ollama_model_manager: OllamaModelManager | None = None,
     ):
@@ -59,7 +75,6 @@ class ChatService:
         self._agents: dict[str, Any] = {}
         self._tools = tools
         self._system_prompt = load_prompt("rag_system")
-        self._search_service = search_service
         self._session_repo = session_repo
         self._model_manager = ollama_model_manager or model_manager
 
@@ -154,25 +169,26 @@ class ChatService:
         agent = self._get_agent(resolved_model)
 
         chat_history = self._get_or_create_chat(session_id)
+        messages = chat_history + [HumanMessage(content=message)]
 
-        presearch_hits: list[MilvusHit] = []
-        if self._search_service:
-            try:
-                raw_hits = self._search_service.search(message)
-                presearch_hits = self._hits_from_raw_search(raw_hits)
-            except Exception as e:
-                logger.warning(f"[RAG] Falha na busca vetorial obrigatória: {e}")
+        result = agent.invoke({"messages": messages})
+        result_messages = result.get("messages", messages)
+        parsed_response = self._parse_agent_output({"messages": result_messages})
 
-        user_content = self._build_user_message(message, presearch_hits)
-        messages = chat_history + [HumanMessage(content=user_content)]
+        if self._should_retry_search(message, result_messages, parsed_response):
+            logger.info("[CHAT] Modelo não chamou search; tentando novamente com instrução explícita.")
+            nudge = HumanMessage(
+                content=(
+                    f"{_SEARCH_RETRY_NUDGE_PREFIX} com query relacionada a: {message}"
+                )
+            )
+            result = agent.invoke({"messages": messages + [nudge]})
+            result_messages = self._strip_search_retry_nudge(
+                result.get("messages", messages + [nudge])
+            )
+            parsed_response = self._parse_agent_output({"messages": result_messages})
 
-        result = agent.invoke({
-            "messages": messages
-        })
-
-        parsed_response = self._parse_agent_output(result, fallback_hits=presearch_hits)
-
-        self.chats[session_id] = result.get("messages", messages)
+        self.chats[session_id] = result_messages
 
         response_time = time.time() - start_time
         confidence_score = 0.0
@@ -180,9 +196,7 @@ class ChatService:
             avg_distance = sum([r.distance or 0 for r in parsed_response.result]) / len(parsed_response.result)
             confidence_score = max(0.0, min(1.0, 1.0 - avg_distance))
 
-        current_turn_messages = self._get_current_turn_messages(
-            result.get("messages", [])
-        )
+        current_turn_messages = self._get_current_turn_messages(result_messages)
         input_tokens, output_tokens, total_tokens = self._extract_token_usage(
             current_turn_messages
         )
@@ -284,26 +298,129 @@ class ChatService:
         last_human_idx = -1
         for i, msg in enumerate(messages):
             if isinstance(msg, HumanMessage) or getattr(msg, "type", "") == "human":
+                if isinstance(msg, HumanMessage) and str(msg.content).startswith(
+                    _SEARCH_RETRY_NUDGE_PREFIX
+                ):
+                    continue
                 last_human_idx = i
-        return messages[last_human_idx:] if last_human_idx >= 0 else messages
+        if last_human_idx < 0:
+            return messages
+        return self._strip_search_retry_nudge(messages[last_human_idx:])
+
+    @staticmethod
+    def _requires_search(message: str) -> bool:
+        return bool(_PIPELINE_SEARCH_PATTERN.search(message))
+
+    def _turn_used_search(self, messages: List[Any]) -> bool:
+        for msg in self._get_current_turn_messages(messages):
+            if isinstance(msg, ToolMessage) or getattr(msg, "type", "") == "tool":
+                return True
+            if isinstance(msg, AIMessage) or getattr(msg, "type", "") == "ai":
+                if getattr(msg, "tool_calls", None):
+                    return True
+        return False
+
+    def _should_retry_search(
+        self,
+        message: str,
+        messages: List[Any],
+        parsed: ParsedResponse,
+    ) -> bool:
+        if not self._requires_search(message):
+            return False
+        if self._turn_used_search(messages) and parsed.result:
+            return False
+        if self._turn_used_search(messages) and not parsed.result:
+            return True
+        answer = parsed.answer.strip().lower()
+        if answer in _BOGUS_TOOL_ANSWERS:
+            return True
+        return not self._turn_used_search(messages)
+
+    @staticmethod
+    def _strip_search_retry_nudge(messages: List[Any]) -> List[Any]:
+        return [
+            msg
+            for msg in messages
+            if not (
+                isinstance(msg, HumanMessage)
+                and str(msg.content).startswith(_SEARCH_RETRY_NUDGE_PREFIX)
+            )
+        ]
+
+    @staticmethod
+    def _message_text_content(msg: Any) -> str:
+        content = getattr(msg, "content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, str):
+                    parts.append(block)
+                elif isinstance(block, dict):
+                    text = block.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+            return "\n".join(parts)
+        return str(content) if content else ""
+
+    @classmethod
+    def _strip_model_artifacts(cls, text: str) -> str:
+        text = _GEMMA_THOUGHT_PATTERN.sub("", text)
+        for tag in _QWEN_THINKING_TAGS:
+            text = re.sub(rf"<{tag}>.*?</{tag}>", "", text, flags=re.DOTALL)
+        text = _QWEN_TOOL_CALL_PATTERN.sub("", text)
+        text = _GEMMA_TOOL_CALL_PATTERN.sub("", text)
+        return text.strip()
+
+    @classmethod
+    def _extract_inline_thinking(cls, content: str) -> list[str]:
+        blocks: list[str] = []
+        for match in re.findall(
+            r"<\|channel>thought\n(.*?)(?:\n\n|\Z)",
+            content,
+            re.DOTALL,
+        ):
+            if match.strip():
+                blocks.append(match.strip())
+        for tag in _QWEN_THINKING_TAGS:
+            for match in re.findall(
+                rf"<{tag}>(.*?)</{tag}>",
+                content,
+                re.DOTALL,
+            ):
+                if match.strip():
+                    blocks.append(match.strip())
+        return blocks
 
     def _extract_thinking(self, messages: List[Any]) -> str:
-        think_blocks = []
+        think_blocks: list[str] = []
         for msg in messages:
-            if isinstance(msg, AIMessage) or getattr(msg, "type", "") == "ai":
-                content = msg.content if isinstance(msg.content, str) else ""
-                gemma_matches = re.findall(r"<\|channel>thought\n(.*?)(?:\s*$|\s*<\|)", content, re.DOTALL)
-                for match in gemma_matches:
-                    if match.strip():
-                        think_blocks.append(match.strip())
-                qwen_tag = "redacted_thinking"
-                qwen_matches = re.findall(
-                    rf"<{qwen_tag}>(.*?)</{qwen_tag}>", content, re.DOTALL
-                )
-                for match in qwen_matches:
-                    if match.strip():
-                        think_blocks.append(match.strip())
+            if not (isinstance(msg, AIMessage) or getattr(msg, "type", "") == "ai"):
+                continue
+            reasoning = (getattr(msg, "additional_kwargs", None) or {}).get(
+                "reasoning_content"
+            )
+            if isinstance(reasoning, str) and reasoning.strip():
+                think_blocks.append(reasoning.strip())
+            think_blocks.extend(
+                self._extract_inline_thinking(self._message_text_content(msg))
+            )
         return "\n".join(think_blocks) if think_blocks else ""
+
+    def _get_final_answer_text(self, messages: List[Any]) -> str:
+        answer = ""
+        for msg in messages:
+            if not (isinstance(msg, AIMessage) or getattr(msg, "type", "") == "ai"):
+                continue
+            content = self._strip_model_artifacts(self._message_text_content(msg))
+            tool_calls = getattr(msg, "tool_calls", None) or []
+            if tool_calls and not content:
+                continue
+            if content:
+                answer = content
+        return answer
 
     def _flatten_hits(self, items: list) -> list:
         flat = []
@@ -331,10 +448,28 @@ class ChatService:
         return MilvusHit(
             id=str(hit.get("id", "")),
             distance=float(hit.get("distance", 0.0)),
-            text=str(text),
+            text=self._redact_sensitive_text(str(text)),
             source=source,
             collection=self._infer_collection(source),
         )
+
+    @classmethod
+    def redact_raw_search_hits(cls, raw: Any) -> Any:
+        """Remove IDs sensíveis dos hits antes de expor ao agente."""
+        if isinstance(raw, list):
+            return [cls.redact_raw_search_hits(item) for item in raw]
+        if isinstance(raw, dict):
+            redacted = dict(raw)
+            if "text" in redacted and isinstance(redacted["text"], str):
+                redacted["text"] = cls._redact_sensitive_text(redacted["text"])
+            entity = redacted.get("entity")
+            if isinstance(entity, dict) and isinstance(entity.get("text"), str):
+                redacted["entity"] = {
+                    **entity,
+                    "text": cls._redact_sensitive_text(entity["text"]),
+                }
+            return redacted
+        return raw
 
     def _hits_from_raw_search(self, raw: Any) -> list[MilvusHit]:
         hits: list[MilvusHit] = []
@@ -345,48 +480,27 @@ class ChatService:
         return hits
 
     @staticmethod
-    def _truncate_chunk_text(text: str, max_chars: int) -> str:
-        text = text.strip()
-        if len(text) <= max_chars:
-            return text
-        return text[: max_chars - 3].rstrip() + "..."
-
-    def _format_hits_for_prompt(self, hits: list[MilvusHit]) -> str:
-        if not hits:
-            return "(vazio)"
-
-        limited = hits[: settings.RAG_MAX_CONTEXT_CHUNKS]
-        lines = []
-        for index, hit in enumerate(limited, start=1):
-            source = hit.source or "desconhecida"
-            text = self._truncate_chunk_text(hit.text, settings.RAG_MAX_CHUNK_CHARS)
-            text = self._redact_sensitive_text(text)
-            lines.append(f"[{index}]\n{text}")
-        return "\n\n".join(lines)
-
-    def _build_user_message(self, message: str, hits: list[MilvusHit]) -> str:
-        context = self._format_hits_for_prompt(hits)
-        return (
-            "--- CONTEXTO ---\n"
-            f"{context}\n"
-            "--- FIM ---\n\n"
-            f"PERGUNTA: {message.strip()}\n\n"
-            "RESPOSTA (tom cordial, máx. 5 frases, sem ids técnicos nem tags de fonte):"
-        )
-
-    def _parse_tool_content(self, content_str: str) -> list:
-        if not content_str:
+    def _parse_tool_content(content: Any) -> list:
+        if not content:
             return []
+        if isinstance(content, list):
+            return content
+        if isinstance(content, dict):
+            return [content]
+        if not isinstance(content, str):
+            content = str(content)
 
         import json
         try:
-            return json.loads(content_str)
+            parsed = json.loads(content)
         except json.JSONDecodeError:
             import ast
             try:
-                return ast.literal_eval(content_str)
+                parsed = ast.literal_eval(content)
             except Exception:
+                logger.warning("[CHAT] Falha ao interpretar conteúdo da tool: %s", content[:200])
                 return []
+        return parsed if isinstance(parsed, list) else [parsed]
 
     def _extract_search_results(self, messages: List[Any]) -> List[MilvusHit]:
         search_results = []
@@ -398,29 +512,16 @@ class ChatService:
                         for hit in self._hits_from_raw_search(res):
                             search_results.append(hit)
                 except Exception as e:
-                    print(f"Error parsing tool message: {e}")
+                    logger.warning("Error parsing tool message: %s", e)
         return search_results
 
-    def _parse_agent_output(
-        self,
-        result: dict,
-        fallback_hits: list[MilvusHit] | None = None,
-    ) -> ParsedResponse:
+    def _parse_agent_output(self, result: dict) -> ParsedResponse:
         messages = result.get("messages", [])
         current_turn_msgs = self._get_current_turn_messages(messages)
 
-        final_ai_message = messages[-1] if messages else AIMessage(content="")
-        raw_output = final_ai_message.content if hasattr(final_ai_message, "content") and isinstance(final_ai_message.content, str) else ""
-
         thinking = self._extract_thinking(current_turn_msgs)
         search_results = self._extract_search_results(current_turn_msgs)
-        if not search_results and fallback_hits:
-            search_results = fallback_hits
-
-        answer = re.sub(r"<\|channel>thought\n.*?(?=\S|\Z)", "", raw_output, flags=re.DOTALL)
-        qwen_tag = "redacted_thinking"
-        answer = re.sub(rf"<{qwen_tag}>.*?</{qwen_tag}>", "", answer, flags=re.DOTALL).strip()
-        answer = self._sanitize_answer(answer)
+        answer = self._sanitize_answer(self._get_final_answer_text(current_turn_msgs))
 
         return ParsedResponse(
             thinking=thinking,

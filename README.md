@@ -118,6 +118,23 @@ make up
 
 Na primeira vez, o download dos modelos pode demorar. O Ollama sobe por padrão com **Qwen3.5 0.8B** (`qwen3.5-0.8b-unsloth`).
 
+O container Ollama executa um **warmup automático** do modelo padrão no startup (`ollama-warmup.sh`), absorvendo o cold start (~3 min em GPUs com 4GB VRAM) antes da API ficar disponível. A API só sobe após o Ollama passar no healthcheck.
+
+Variáveis úteis no `.env`:
+
+| Variável | Default | Descrição |
+|----------|---------|-----------|
+| `OLLAMA_KEEP_ALIVE` | `30m` | Tempo que o modelo permanece na VRAM entre requisições |
+| `OLLAMA_WARMUP_ENABLED` | `true` | Desative (`false`) para pular warmup em dev |
+| `OLLAMA_NUM_PREDICT` | `128` | Limite de tokens gerados por resposta |
+
+### Fluxo do chat (RAG agentico)
+
+1. Usuário envia pergunta em `POST /chat/message`
+2. O agente LangChain decide chamar a tool `search`
+3. A busca vetorial consulta Milvus (governança + metadados MLflow)
+4. O agente responde com base nos resultados da tool
+
 ### GPU (NVIDIA / AMD / CPU)
 
 O Makefile detecta a GPU automaticamente. Para forçar um perfil:

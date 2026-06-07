@@ -1,12 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List
 
 from app.infrastructure.clients.postgres_client import MLflowSearchClient
-
-# Reutiliza os serviços já instanciados em chat.py para não carregar
-# um segundo modelo MiniLM na memória
-from app.api.routes.chat import searchService as _search_service
+from app.api.routes import chat as chat_routes
 
 router = APIRouter(
     prefix="",
@@ -55,7 +52,9 @@ def query(request: QueryRequest):
     Realiza busca semântica na base vetorial (Milvus) usando os documentos
     de governança indexados. Retorna os trechos mais relevantes para a consulta.
     """
-    raw = _search_service.search(request.query)
+    if chat_routes.searchService is None:
+        raise HTTPException(status_code=503, detail="SearchService não inicializado")
+    raw = chat_routes.searchService.search(request.query)
 
     items: List[QueryResultItem] = []
     for hit_list in raw:

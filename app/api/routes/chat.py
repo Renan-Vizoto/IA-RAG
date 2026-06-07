@@ -5,7 +5,7 @@ import uuid
 
 from app.core.services.chat_service import ChatService
 from app.core.services.search_service import SearchService
-from app.infrastructure.implementations.embbeding.MiniLML12_embbeding import MiniLML12_Embbeding
+from app.core.interfaces.embbeding import EmbeddingStrategy
 from app.infrastructure.repositories.milvus_repo import MilvusRepo
 from app.infrastructure.repositories.chat_session_repo import ChatSessionRepository
 from app.infrastructure.clients import milvus_client
@@ -22,29 +22,39 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-embbeder = MiniLML12_Embbeding()
 repo = MilvusRepo(milvus_client.milvusClient)
-searchService = SearchService(repo, embbeder)
-search_tool = tool(searchService.search)
+searchService: SearchService | None = None
+search_tool = None
 
 session_repo: ChatSessionRepository | None = None
 chatService: ChatService | None = None
 
 
-def init_chat_dependencies(chat_session_repo: ChatSessionRepository):
-    global session_repo, chatService
+def _build_search_tool(service: SearchService):
+    @tool
+    def search(query: str) -> list:
+        """Busca semântica em governança do pipeline e metadados MLflow.
+
+        Chame SEMPRE antes de responder perguntas sobre modelo treinado,
+        métricas (RMSE, MAE, R²), hiperparâmetros ou etapas do pipeline.
+        """
+        raw = service.search(query)
+        return ChatService.redact_raw_search_hits(raw)
+
+    return search
+
+
+def init_chat_dependencies(
+    chat_session_repo: ChatSessionRepository,
+    embedder: EmbeddingStrategy,
+):
+    global session_repo, chatService, searchService, search_tool
     session_repo = chat_session_repo
+    searchService = SearchService(repo, embedder)
+    search_tool = _build_search_tool(searchService)
     chatService = ChatService(
         tools=[search_tool],
-        search_service=searchService,
         session_repo=session_repo,
-    )
-
-
-if chatService is None:
-    chatService = ChatService(
-        tools=[search_tool],
-        search_service=searchService,
     )
 
 
@@ -54,6 +64,9 @@ def send_message(
     response: Response,
     session_id: Annotated[str | None, Cookie()] = None
 ):
+    if chatService is None:
+        raise HTTPException(status_code=503, detail="Chat não inicializado")
+
     if not session_id:
         session_id = str(uuid.uuid4())
         response.set_cookie(

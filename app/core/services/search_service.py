@@ -11,17 +11,18 @@ class SearchService:
     def search(self, text: str) -> str:
         """Busca semântica na governança do pipeline e nos metadados MLflow indexados."""
         vector = self._embbed.embbed_it([text])
+        top_k = settings.RAG_MAX_CONTEXT_CHUNKS
 
         gov_hits = self._repo.search(
             settings.governance_collection,
             vector,
-            limit=5,
+            limit=top_k,
             output_fields=["text", "source"],
         )
         mlflow_hits = self._repo.search(
             settings.mlflow_metadata_collection,
             vector,
-            limit=5,
+            limit=top_k,
             output_fields=["text", "source", "run_id"],
         )
 
@@ -31,5 +32,5 @@ class SearchService:
                 merged.append(hit)
 
         merged.sort(key=lambda h: h.get("distance", 1.0))
-        top = merged[:5]
+        top = merged[:top_k]
         return [top]

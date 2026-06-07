@@ -13,6 +13,29 @@ def repo():
 class TestChatSessionRepository:
 
     @patch("app.infrastructure.repositories.chat_session_repo.psycopg2.connect")
+    def test_init_schema_cria_database_e_tabelas(self, mock_connect, repo):
+        admin_conn = MagicMock()
+        app_conn = MagicMock()
+        admin_cur = MagicMock()
+        app_cur = MagicMock()
+        mock_connect.side_effect = [admin_conn, app_conn]
+        admin_conn.cursor.return_value.__enter__ = lambda s: admin_cur
+        admin_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        app_conn.cursor.return_value.__enter__ = lambda s: app_cur
+        app_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        admin_cur.fetchone.return_value = None
+
+        repo.init_schema()
+
+        assert mock_connect.call_count == 2
+        admin_cur.execute.assert_any_call(
+            "SELECT 1 FROM pg_database WHERE datname = %s",
+            ("rag",),
+        )
+        app_cur.execute.assert_called_once()
+        assert "CREATE TABLE IF NOT EXISTS chat_sessions" in app_cur.execute.call_args[0][0]
+
+    @patch("app.infrastructure.repositories.chat_session_repo.psycopg2.connect")
     def test_ensure_session_insere_se_nao_existir(self, mock_connect, repo):
         conn = MagicMock()
         cur = MagicMock()

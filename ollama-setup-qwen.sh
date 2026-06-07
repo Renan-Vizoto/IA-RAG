@@ -1,21 +1,25 @@
 #!/bin/bash
 set -e
 
-apt-get update && apt-get install -y curl
+if [ -z "${REGISTER_ONLY:-}" ]; then
+  apt-get update && apt-get install -y curl
+fi
 
 GGUF_PATH="/root/.ollama/Qwen3.5-0.8B-Q4_K_M.gguf"
 HF_URL="https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf"
 MODEL_NAME="qwen3.5-0.8b-unsloth"
+MODELFILE="/Modelfile-${MODEL_NAME}"
 
 if [ ! -f "$GGUF_PATH" ]; then
   echo "Downloading Qwen3.5-0.8B model..."
   mkdir -p /root/.ollama
   curl -L -o "$GGUF_PATH" "$HF_URL"
 else
-  echo "Model already exists, skipping download."
+  echo "Qwen model already exists, skipping download."
 fi
 
-cat > /Modelfile-qwen << 'EOF'
+# Qwen via GGUF precisa de TEMPLATE com tool_call; o renderer nativo não é aplicado ao FROM local.
+cat > "$MODELFILE" << 'EOF'
 FROM /root/.ollama/Qwen3.5-0.8B-Q4_K_M.gguf
 
 PARAMETER stop "<|im_end|>"
@@ -73,15 +77,24 @@ For each function call, return a json object with function name and arguments wi
 {{- end }}"""
 EOF
 
+register_model() {
+  ollama rm -f "$MODEL_NAME" 2>/dev/null || true
+  echo "Creating model $MODEL_NAME..."
+  ollama create "$MODEL_NAME" -f "$MODELFILE"
+}
+
+if [ -n "${REGISTER_ONLY:-}" ]; then
+  register_model
+  echo "[OLLAMA] Modelo $MODEL_NAME registrado."
+  exit 0
+fi
+
 ollama serve &
 OLLAMA_PID=$!
 sleep 10
 
-if ! ollama list | grep -q "$MODEL_NAME"; then
-  echo "Creating model $MODEL_NAME..."
-  ollama create "$MODEL_NAME" -f /Modelfile-qwen
-else
-  echo "Model $MODEL_NAME already registered, skipping create."
-fi
+register_model
+
+bash /ollama-warmup.sh "$MODEL_NAME"
 
 wait $OLLAMA_PID

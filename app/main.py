@@ -35,9 +35,10 @@ chat_session_repo = ChatSessionRepository()
 async def lifespan(app: FastAPI):
     try:
         chat_session_repo.init_schema()
-        chat.init_chat_dependencies(chat_session_repo)
     except Exception as e:
         logger.warning(f"[CHAT_DB] Schema não inicializado: {e}")
+
+    chat.init_chat_dependencies(chat_session_repo, embedder)
 
     if not milvusClient.has_collection(settings.governance_collection):
         schema_builder.build(settings.governance_collection)
@@ -63,6 +64,12 @@ async def lifespan(app: FastAPI):
 
     await governance_indexer.run()
     await mlflow_indexer.run()
+
+    try:
+        embedder.embbed_it(["warmup"])
+        logger.info("[EMBEDDER] Modelo de embedding aquecido.")
+    except Exception as e:
+        logger.warning(f"[EMBEDDER] Falha no warmup: {e}")
 
     yield
 
