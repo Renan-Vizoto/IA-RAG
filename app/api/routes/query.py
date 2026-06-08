@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List
 
 from app.infrastructure.clients.postgres_client import MLflowSearchClient
 from app.api.routes import chat as chat_routes
+from app.api.docs import build_error_responses
 
 router = APIRouter(
     prefix="",
@@ -17,36 +18,141 @@ _mlflow_client = MLflowSearchClient()
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
 class QueryRequest(BaseModel):
-    query: str
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "query": "Qual foi o RMSE do modelo treinado?",
+                }
+            ]
+        }
+    )
+
+    query: str = Field(
+        description="Natural language text to embed and search in Milvus.",
+        examples=["Qual foi o RMSE do modelo treinado?"],
+    )
 
 class QueryResultItem(BaseModel):
-    id: str | None = None
-    distance: float | None = None
-    text: str
-    source: str | None = None
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": "mlflow:run:metrics",
+                    "distance": 0.12,
+                    "text": "RMSE de validacao: 89.1. MAE: 41.2.",
+                    "source": "mlflow_metadata",
+                }
+            ]
+        }
+    )
+
+    id: str | None = Field(default=None, description="Milvus hit identifier.")
+    distance: float | None = Field(
+        default=None,
+        description="Cosine distance returned by Milvus. Lower values are more similar.",
+    )
+    text: str = Field(description="Retrieved text snippet.")
+    source: str | None = Field(default=None, description="Indexed source label.")
 
 class QueryResponse(BaseModel):
-    query: str
-    results: List[QueryResultItem]
-    total: int
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "query": "Qual foi o RMSE do modelo treinado?",
+                    "results": [
+                        {
+                            "id": "mlflow:run:metrics",
+                            "distance": 0.12,
+                            "text": "RMSE de validacao: 89.1. MAE: 41.2.",
+                            "source": "mlflow_metadata",
+                        }
+                    ],
+                    "total": 1,
+                }
+            ]
+        }
+    )
+
+    query: str = Field(description="Echo of the submitted query.")
+    results: List[QueryResultItem] = Field(
+        description="Flattened Milvus hits sorted by ascending distance."
+    )
+    total: int = Field(description="Number of returned items.")
 
 class RunInfo(BaseModel):
-    run_id: str
-    status: str
-    start_time: str
-    metrics: dict
-    params: dict
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "run_id": "a1888f014bb04b61ba4c245bb58552c8",
+                    "status": "FINISHED",
+                    "start_time": "2026-06-08 12:34:56+00:00",
+                    "metrics": {"rmse": 89.1, "mae": 41.2, "r2": 0.87},
+                    "params": {"model": "xgboost", "max_depth": "6"},
+                }
+            ]
+        }
+    )
+
+    run_id: str = Field(description="MLflow run ID.")
+    status: str = Field(description="MLflow run status.")
+    start_time: str = Field(description="Run start time converted to string.")
+    metrics: dict = Field(
+        description="Metric names to numeric values, for example rmse, mae, and r2."
+    )
+    params: dict = Field(description="MLflow parameter names to string values.")
 
 class MetadataResponse(BaseModel):
-    experiment: str
-    total_runs: int
-    best_run: RunInfo | None
-    all_runs: List[RunInfo]
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "experiment": "dutch-energy-training",
+                    "total_runs": 1,
+                    "best_run": {
+                        "run_id": "a1888f014bb04b61ba4c245bb58552c8",
+                        "status": "FINISHED",
+                        "start_time": "2026-06-08 12:34:56+00:00",
+                        "metrics": {"rmse": 89.1, "mae": 41.2, "r2": 0.87},
+                        "params": {"model": "xgboost", "max_depth": "6"},
+                    },
+                    "all_runs": [
+                        {
+                            "run_id": "a1888f014bb04b61ba4c245bb58552c8",
+                            "status": "FINISHED",
+                            "start_time": "2026-06-08 12:34:56+00:00",
+                            "metrics": {"rmse": 89.1, "mae": 41.2, "r2": 0.87},
+                            "params": {"model": "xgboost", "max_depth": "6"},
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    experiment: str = Field(description="Configured MLflow training experiment name.")
+    total_runs: int = Field(description="Number of runs returned by MLflow.")
+    best_run: RunInfo | None = Field(
+        description="Best run by lowest rmse, fallback newest run, or null."
+    )
+    all_runs: List[RunInfo] = Field(description="Runs returned by MLflow.")
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.post("/query", response_model=QueryResponse, summary="Busca semântica vetorial")
+@router.post(
+    "/query",
+    response_model=QueryResponse,
+    summary="Semantic vector search",
+    description=(
+        "Embeds the submitted query, searches the governance and MLflow metadata "
+        "Milvus collections, merges the hits, sorts by ascending cosine distance, "
+        "and returns up to RAG_MAX_CONTEXT_CHUNKS results."
+    ),
+    responses=build_error_responses(422, 500, 503),
+)
 def query(request: QueryRequest):
     """
     Realiza busca semântica na base vetorial (Milvus) usando os documentos
@@ -73,7 +179,17 @@ def query(request: QueryRequest):
     )
 
 
-@router.get("/metadata", response_model=MetadataResponse, summary="Metadados do modelo treinado")
+@router.get(
+    "/metadata",
+    response_model=MetadataResponse,
+    summary="Training model metadata",
+    description=(
+        "Returns MLflow training runs from the configured experiment. Metrics and "
+        "params are normalized by removing the MLflow `metrics.` and `params.` "
+        "prefixes. `best_run` is selected by the lowest `rmse` metric when present."
+    ),
+    responses=build_error_responses(500),
+)
 def metadata():
     """
     Retorna metadados dos experimentos de treinamento registrados no MLflow:

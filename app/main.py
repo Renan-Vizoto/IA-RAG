@@ -14,7 +14,14 @@ from app.pipeline.storage import MinioStorage
 from app.core.workers.governance_indexer import start_worker as start_governance_indexer
 from app.core.workers.mlflow_metadata_indexer import start_worker as start_mlflow_indexer
 from app.infrastructure.repositories.chat_session_repo import ChatSessionRepository
+from app.api.docs import (
+    OPENAPI_TAGS,
+    build_error_responses,
+    configure_openapi,
+    register_docs_routes,
+)
 from app.api.routes import chat, query
+from app.api.schemas.health import HealthResponse
 import logging
 
 logger = logging.getLogger(__name__)
@@ -79,12 +86,29 @@ app = FastAPI(
     description="API de Retrieval Augmented Generation para análise de consumo de energia elétrica holandesa.",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_tags=OPENAPI_TAGS,
 )
 
 app.include_router(chat.router)
 app.include_router(query.router)
 
 
-@app.get("/health", tags=["health"], summary="Healthcheck da API")
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    tags=["health"],
+    summary="API healthcheck",
+    description=(
+        "Returns a minimal liveness payload. This endpoint does not perform a "
+        "deep dependency check against Milvus, Ollama, PostgreSQL, MLflow, or MinIO."
+    ),
+    responses=build_error_responses(500),
+)
 def health():
-    return {"ok": "ok"}
+    return HealthResponse(ok="ok")
+
+
+configure_openapi(app)
+register_docs_routes(app)
