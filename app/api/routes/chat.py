@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Cookie, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Annotated
 import uuid
 
@@ -11,10 +11,36 @@ from app.infrastructure.repositories.chat_session_repo import ChatSessionReposit
 from app.infrastructure.clients import milvus_client
 from langchain_core.tools import tool
 from app.api.schemas.chat_response import ChatResponse, ChatTraceResponse, TokenUsage, MilvusHitTrace
+from app.api.docs import build_error_responses
 
 class ChatRequest(BaseModel):
-    message: str
-    model: str | None = None
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "message": "Qual modelo foi treinado e qual foi o RMSE?",
+                    "model": "gemma4-unsloth",
+                },
+                {
+                    "message": "Explique o pipeline bronze, silver e gold.",
+                    "model": None,
+                },
+            ]
+        }
+    )
+
+    message: str = Field(
+        description="User message sent to the LangChain RAG agent.",
+        examples=["Qual modelo foi treinado e qual foi o RMSE?"],
+    )
+    model: str | None = Field(
+        default=None,
+        description=(
+            "Optional Ollama model override. Must be listed in "
+            "OLLAMA_ALLOWED_MODELS; when omitted, OLLAMA_MODEL is used."
+        ),
+        examples=["gemma4-unsloth"],
+    )
 
 router = APIRouter(
     prefix="/chat",
@@ -58,7 +84,18 @@ def init_chat_dependencies(
     )
 
 
-@router.post("/message", response_model=ChatResponse)
+@router.post(
+    "/message",
+    response_model=ChatResponse,
+    summary="Send a RAG chat message",
+    description=(
+        "Sends a user message to the LangChain agent. The agent may call the "
+        "internal semantic search tool before generating the final answer with "
+        "Ollama. If no `session_id` cookie is provided, the API creates a UUID "
+        "session and returns it as an HttpOnly cookie with a seven-day lifetime."
+    ),
+    responses=build_error_responses(400, 422, 500, 503),
+)
 def send_message(
     request: ChatRequest,
     response: Response,
@@ -86,7 +123,17 @@ def send_message(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.get("/trace/{response_id}", response_model=ChatTraceResponse, summary="Rastreio da resposta")
+@router.get(
+    "/trace/{response_id}",
+    response_model=ChatTraceResponse,
+    summary="Get chat response trace",
+    description=(
+        "Returns persisted observability data for a previous chat response, "
+        "including the original user message, sanitized answer, token usage, "
+        "response latency, confidence score, and retrieved Milvus hit previews."
+    ),
+    responses=build_error_responses(404, 500, 503),
+)
 def get_trace(response_id: str):
     if not session_repo:
         raise HTTPException(status_code=503, detail="Repositório de sessão não inicializado")

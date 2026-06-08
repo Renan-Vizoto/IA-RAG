@@ -1,5 +1,6 @@
 minio
 fastapi[standard]
+scalar-fastapi==1.8.2
 pymilvus==2.6.9
 sentence-transformers
 pypdf
