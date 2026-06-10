@@ -79,6 +79,7 @@ class ChatResponse(BaseModel):
                     "response_time_seconds": 1.25,
                     "confidence_score": 0.88,
                     "session_id": "8b2d3ff5-2f4a-4a1e-b23b-4d61b67a61bb",
+                    "chat_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                     "message_count": 4,
                     "response_id": "64682936-5f57-4772-baf8-dd6f546a4c98",
                     "model": "gemma4-unsloth",
@@ -87,7 +88,7 @@ class ChatResponse(BaseModel):
                         "output_tokens": 48,
                         "total_tokens": 168,
                     },
-                    "session_tokens": {
+                    "chat_tokens": {
                         "input_tokens": 120,
                         "output_tokens": 48,
                         "total_tokens": 168,
@@ -111,16 +112,17 @@ class ChatResponse(BaseModel):
         description="Score derived from retrieved vector distances, clamped from 0 to 1."
     )
     session_id: str = Field(description="Chat session ID from the HttpOnly cookie.")
+    chat_id: str = Field(description="Active chat thread ID for this conversation.")
     message_count: int = Field(
-        description="Number of LangChain messages stored for this session."
+        description="Number of user messages in this chat thread."
     )
     response_id: str = Field(
         description="Unique response ID used by the trace endpoint."
     )
     model: str = Field(description="Resolved Ollama model used for generation.")
     tokens: TokenUsage = Field(description="Token usage for the current turn.")
-    session_tokens: TokenUsage = Field(
-        description="Persisted cumulative token usage for this session."
+    chat_tokens: TokenUsage = Field(
+        description="Persisted cumulative token usage for this chat."
     )
 
 class MilvusHitTrace(BaseModel):
@@ -157,6 +159,7 @@ class ChatTraceResponse(BaseModel):
                 {
                     "response_id": "64682936-5f57-4772-baf8-dd6f546a4c98",
                     "session_id": "8b2d3ff5-2f4a-4a1e-b23b-4d61b67a61bb",
+                    "chat_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                     "model": "gemma4-unsloth",
                     "user_message": "Qual modelo foi treinado e qual foi o RMSE?",
                     "answer": "O modelo treinado foi XGBoost e o RMSE foi 89.1.",
@@ -184,6 +187,10 @@ class ChatTraceResponse(BaseModel):
 
     response_id: str = Field(description="Persisted response ID.")
     session_id: str = Field(description="Session that produced the response.")
+    chat_id: str | None = Field(
+        default=None,
+        description="Chat thread that produced the response.",
+    )
     model: str = Field(description="Model used for the answer.")
     user_message: str = Field(description="Original user message.")
     answer: str = Field(description="Final sanitized answer returned by chat.")

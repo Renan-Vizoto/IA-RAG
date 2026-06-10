@@ -43,20 +43,21 @@ class TestChatModelParam:
             response_time_seconds=1.0,
             confidence_score=0.0,
             session_id="sess-1",
+            chat_id="chat-1",
             message_count=1,
             response_id="r1",
             model="gemma4-unsloth",
             tokens=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
-            session_tokens=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+            chat_tokens=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
         )
 
         response = send_message(
-            ChatRequest(message="oi", model="gemma4-unsloth"),
+            ChatRequest(message="oi", model="gemma4-unsloth", chat_id="chat-1"),
             response=MagicMock(),
             session_id="sess-1",
         )
 
         chat_routes.chatService.send_message.assert_called_once_with(
-            "oi", "sess-1", model="gemma4-unsloth"
+            "oi", "sess-1", model="gemma4-unsloth", chat_id="chat-1"
         )
         assert response.model == "gemma4-unsloth"

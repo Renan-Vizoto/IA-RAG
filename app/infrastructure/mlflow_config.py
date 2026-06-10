@@ -26,6 +26,7 @@ def initialize_training_mlflow():
 def log_chat_response(
     response_id: str,
     session_id: str,
+    chat_id: str,
     model: str,
     user_message: str,
     answer: str,
@@ -33,6 +34,7 @@ def log_chat_response(
 ):
     with mlflow.start_run(run_name=response_id):
         mlflow.set_tag("session_id", session_id)
+        mlflow.set_tag("chat_id", chat_id)
         mlflow.set_tag("response_id", response_id)
         mlflow.log_param("model", model)
         mlflow.log_param("user_message", user_message[:500])

@@ -30,12 +30,17 @@ The API exposes three main capabilities:
 - Direct semantic retrieval against Milvus vector collections.
 - MLflow training metadata for model dashboards and audit screens.
 
-Use `POST /chat/message` for conversational experiences, `POST /query` for raw
-retrieval, and `GET /chat/trace/{response_id}` when a UI needs to show evidence
-and response observability.
+Use `POST /chat/message` for conversational experiences, `POST /chat/chats` and
+`GET /chat/chats` to manage chat threads, `GET /chat/chats/{chat_id}/messages`
+for history, `POST /query` for raw retrieval, and `GET /chat/trace/{response_id}`
+when a UI needs to show evidence and response observability.
 
-Session behavior: chat uses an `HttpOnly` `session_id` cookie. If the client
-does not send one, the API creates it and returns `Set-Cookie`.
+Session behavior: chat uses an `HttpOnly` `session_id` cookie for anonymous
+visitors. If the client does not send one, the API creates it and returns
+`Set-Cookie`. Each session can have multiple chats; pass `chat_id` in
+`POST /chat/message` or rely on the `chat_id` HttpOnly cookie. When no chat
+exists yet, the API creates one and returns it in the response body and cookie.
+Token usage is tracked per turn (`tokens`) and cumulatively per chat (`chat_tokens`).
 """
 
 OPENAPI_TAGS = [

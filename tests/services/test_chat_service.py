@@ -76,7 +76,11 @@ def mock_search_tool():
 @pytest.fixture
 def mock_session_repo():
     repo = MagicMock()
-    repo.get_session_tokens.side_effect = [
+    repo.ensure_chat.return_value = "chat-1"
+    repo.get_chat.return_value = {"session_id": "sess-1", "chat_id": "chat-1", "title": "New chat"}
+    repo.get_messages.return_value = []
+    repo.count_messages.return_value = 2
+    repo.get_chat_tokens.side_effect = [
         {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
         {"input_tokens": 30, "output_tokens": 12, "total_tokens": 42},
     ]
@@ -113,13 +117,15 @@ class TestChatService:
         mock_create_agent.return_value = agent
 
         service = service_factory(session_repo=mock_session_repo)
-        response = service.send_message("Qual o modelo?", session_id="sess-1")
+        response = service.send_message("Qual o modelo?", session_id="sess-1", chat_id="chat-1")
 
         assert isinstance(response, ChatResponse)
         assert response.session_id == "sess-1"
+        assert response.chat_id == "chat-1"
         assert response.model == settings.OLLAMA_MODEL
         assert response.response_id
         assert response.tokens.input_tokens == 10
+        assert response.chat_tokens.total_tokens == 15
         assert len(response.search_results) == 1
 
     @patch("app.core.services.chat_service.log_chat_response")
@@ -185,6 +191,196 @@ class TestChatService:
 
         with pytest.raises(ValueError, match="não permitido"):
             service.send_message("oi", session_id="sess-1", model="modelo-inexistente")
+
+    @patch("app.core.services.chat_service.log_chat_response")
+    @patch("app.core.services.chat_service.create_agent")
+    @patch("app.core.services.chat_service.create_chat_model")
+    def test_chat_tokens_acumulam_por_chat(
+        self, mock_create_chat_model, mock_create_agent, mock_log,
+        mock_agent_result_sem_tool, mock_session_repo, service_factory,
+    ):
+        agent = MagicMock()
+        agent.invoke.return_value = mock_agent_result_sem_tool
+        mock_create_agent.return_value = agent
+
+        mock_session_repo.ensure_chat.side_effect = ["chat-a", "chat-b"]
+
+        service = service_factory(session_repo=mock_session_repo)
+        service.send_message("Pergunta 1", session_id="sess-1", chat_id="chat-a")
+        service.send_message("Pergunta 2", session_id="sess-1", chat_id="chat-b")
+
+        assert mock_session_repo.ensure_chat.call_args_list[0][0] == ("sess-1", "chat-a")
+        assert mock_session_repo.ensure_chat.call_args_list[1][0] == ("sess-1", "chat-b")
+        assert mock_session_repo.add_chat_tokens.call_args_list[0][0][0] == "chat-a"
+        assert mock_session_repo.add_chat_tokens.call_args_list[1][0][0] == "chat-b"
+
+    @patch("app.core.services.chat_service.log_chat_response")
+    @patch("app.core.services.chat_service.create_agent")
+    @patch("app.core.services.chat_service.create_chat_model")
+    def test_hidrata_historico_do_repositorio(
+        self, mock_create_chat_model, mock_create_agent, mock_log,
+        mock_agent_result_sem_tool, service_factory,
+    ):
+        from langchain_core.messages import HumanMessage
+
+        agent = MagicMock()
+        agent.invoke.return_value = mock_agent_result_sem_tool
+        mock_create_agent.return_value = agent
+
+        repo = MagicMock()
+        repo.ensure_chat.return_value = "chat-1"
+        repo.get_messages.return_value = [
+            {"role": "user", "content": "mensagem anterior"},
+            {"role": "assistant", "content": "resposta anterior"},
+        ]
+        repo.get_chat_tokens.return_value = {
+            "input_tokens": 10, "output_tokens": 5, "total_tokens": 15,
+        }
+        repo.count_messages.return_value = 4
+
+        service = service_factory(session_repo=repo)
+        service.send_message("nova pergunta", session_id="sess-1", chat_id="chat-1")
+
+        invoked_messages = agent.invoke.call_args[0][0]["messages"]
+        assert isinstance(invoked_messages[0], HumanMessage)
+        assert invoked_messages[0].content == "mensagem anterior"
+        assert invoked_messages[-1].content == "nova pergunta"
+
+    @patch("app.core.services.chat_service.log_chat_response")
+    @patch("app.core.services.chat_service.create_agent")
+    @patch("app.core.services.chat_service.create_chat_model")
+    def test_chat_inexistente_chama_ensure_chat(
+        self, mock_create_chat_model, mock_create_agent, mock_log,
+        mock_agent_result_sem_tool, service_factory,
+    ):
+        agent = MagicMock()
+        agent.invoke.return_value = mock_agent_result_sem_tool
+        mock_create_agent.return_value = agent
+
+        repo = MagicMock()
+        repo.ensure_chat.return_value = "chat-novo"
+        repo.get_chat_tokens.return_value = {
+            "input_tokens": 10, "output_tokens": 5, "total_tokens": 15,
+        }
+        repo.count_messages.return_value = 2
+
+        service = service_factory(session_repo=repo)
+        response = service.send_message("oi", session_id="sess-1", chat_id="chat-1")
+
+        repo.ensure_chat.assert_called_once_with("sess-1", "chat-1")
+        assert response.chat_id == "chat-novo"
+
+
+class TestCompactChatHistory:
+
+    def test_compact_remove_tool_messages_e_tool_calls(self):
+        from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+        messages = [
+            HumanMessage(content="Qual o modelo?"),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "search", "args": {"query": "modelo"}, "id": "c1"}],
+            ),
+            ToolMessage(content='[{"id": "1", "text": "chunk enorme"}]', tool_call_id="c1"),
+            AIMessage(content="O modelo treinado foi XGBoost."),
+        ]
+        compact = ChatService._compact_chat_history(messages)
+
+        assert len(compact) == 2
+        assert compact[0].content == "Qual o modelo?"
+        assert compact[1].content == "O modelo treinado foi XGBoost."
+
+    def test_compact_ignora_nudge_de_retry(self):
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        messages = [
+            HumanMessage(content="pergunta"),
+            HumanMessage(
+                content="INSTRUÇÃO INTERNA: chame a ferramenta search com query relacionada a: pergunta"
+            ),
+            AIMessage(content="resposta"),
+        ]
+        compact = ChatService._compact_chat_history(messages)
+
+        assert len(compact) == 2
+        assert compact[0].content == "pergunta"
+
+    @patch("app.core.services.chat_service.log_chat_response")
+    @patch("app.core.services.chat_service.create_agent")
+    @patch("app.core.services.chat_service.create_chat_model")
+    def test_segundo_turno_nao_reenvia_tool_messages(
+        self, mock_create_chat_model, mock_create_agent, mock_log,
+        mock_agent_result_with_tool, service_factory,
+    ):
+        from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+        rmse_hits = [[
+            {
+                "id": "hit-2",
+                "distance": 0.15,
+                "entity": {"text": "RMSE no teste: 89.1.", "source": "mlflow_report"},
+            }
+        ]]
+        rmse_result = {
+            "messages": [
+                HumanMessage(content="Qual o modelo?"),
+                AIMessage(content="O modelo treinado foi XGBoost."),
+                HumanMessage(content="Qual o RMSE?"),
+                AIMessage(
+                    content="",
+                    tool_calls=[{
+                        "name": "search",
+                        "args": {"query": "rmse"},
+                        "id": "call-2",
+                        "type": "tool_call",
+                    }],
+                ),
+                ToolMessage(content=json.dumps(rmse_hits), tool_call_id="call-2"),
+                AIMessage(
+                    content="O RMSE do modelo foi 89.1.",
+                    usage_metadata={"input_tokens": 8, "output_tokens": 4, "total_tokens": 12},
+                ),
+            ]
+        }
+
+        agent = MagicMock()
+        agent.invoke.side_effect = [mock_agent_result_with_tool, rmse_result]
+        mock_create_agent.return_value = agent
+
+        service = service_factory()
+        service.send_message("Qual o modelo?", session_id="sess-1", chat_id="chat-1")
+        service.send_message("Qual o RMSE?", session_id="sess-1", chat_id="chat-1")
+
+        second_invoke = agent.invoke.call_args_list[1][0][0]["messages"]
+        assert not any(
+            isinstance(msg, ToolMessage) or getattr(msg, "type", "") == "tool"
+            for msg in second_invoke
+        )
+        assert len(second_invoke) == 3
+        assert isinstance(second_invoke[0], HumanMessage)
+        assert second_invoke[0].content == "Qual o modelo?"
+        assert second_invoke[1].content == "O modelo treinado foi XGBoost."
+        assert second_invoke[2].content == "Qual o RMSE?"
+
+    @patch("app.core.services.chat_service.log_chat_response")
+    @patch("app.core.services.chat_service.create_agent")
+    @patch("app.core.services.chat_service.create_chat_model")
+    def test_message_count_reflete_perguntas_do_usuario(
+        self, mock_create_chat_model, mock_create_agent, mock_log,
+        mock_agent_result_with_tool, service_factory,
+    ):
+        agent = MagicMock()
+        agent.invoke.return_value = mock_agent_result_with_tool
+        mock_create_agent.return_value = agent
+
+        service = service_factory()
+        response = service.send_message(
+            "Qual o modelo?", session_id="sess-1", chat_id="chat-1"
+        )
+
+        assert response.message_count == 1
+        assert len(service._chat_histories["chat-1"]) == 2
 
 
 class TestSearchRetry:

@@ -62,7 +62,6 @@ class ParsedResponse(BaseModel):
     result: Any
 
 class ChatService:
-    chats: Dict[str, List[Message]] = {}
 
     def __init__(
         self,
@@ -70,6 +69,7 @@ class ChatService:
         session_repo: Optional[ChatSessionRepository] = None,
         ollama_model_manager: OllamaModelManager | None = None,
     ):
+        self._chat_histories: Dict[str, List[Message]] = {}
         self._default_model = settings.OLLAMA_MODEL
         self._allowed_models = set(settings.ollama_allowed_models)
         self._agents: dict[str, Any] = {}
@@ -97,17 +97,45 @@ class ChatService:
             )
         return self._agents[model_name]
 
-    def _get_or_create_chat(self, session_id: str) -> List[Message]:
-        chat = self.chats.get(session_id)
-        if chat is None:
-            chat = []
-            self.chats[session_id] = chat
-        return chat
+    def _resolve_chat_id(self, session_id: str, chat_id: str | None) -> str:
+        if not self._session_repo:
+            return chat_id or str(uuid.uuid4())
+        return self._session_repo.ensure_chat(session_id, chat_id)
 
-    def _persist_session_data(
+    def _load_chat_history(self, chat_id: str) -> List[Message]:
+        cached = self._chat_histories.get(chat_id)
+        if cached is not None:
+            return cached
+
+        history: List[Message] = []
+        if self._session_repo:
+            try:
+                for row in self._session_repo.get_messages(chat_id):
+                    if row["role"] == "user":
+                        history.append(HumanMessage(content=row["content"]))
+                    elif row["role"] == "assistant":
+                        history.append(AIMessage(content=row["content"]))
+            except Exception as e:
+                logger.warning(f"[CHAT_DB] Falha ao carregar histórico: {e}")
+
+        self._chat_histories[chat_id] = history
+        return history
+
+    def _maybe_auto_title(self, chat_id: str, message: str) -> None:
+        if not self._session_repo:
+            return
+        try:
+            if self._session_repo.count_messages(chat_id) == 2:
+                title = message.strip()[:50] or "New chat"
+                self._session_repo.update_chat_title(chat_id, title)
+        except Exception as e:
+            logger.warning(f"[CHAT_DB] Falha ao definir título do chat: {e}")
+
+    def _persist_chat_data(
         self,
         response_id: str,
         session_id: str,
+        chat_id: str,
         message: str,
         parsed_response: ParsedResponse,
         input_tokens: int | None,
@@ -117,7 +145,7 @@ class ChatService:
         confidence_score: float,
         model_name: str,
     ) -> TokenUsage:
-        default_session = TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0)
+        default_chat = TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0)
         if not self._session_repo:
             return TokenUsage(
                 input_tokens=input_tokens,
@@ -127,9 +155,19 @@ class ChatService:
 
         try:
             self._session_repo.ensure_session(session_id)
+            self._session_repo.save_message(
+                str(uuid.uuid4()), chat_id, "user", message
+            )
+            self._session_repo.save_message(
+                str(uuid.uuid4()), chat_id, "assistant", parsed_response.answer
+            )
+            self._maybe_auto_title(chat_id, message)
+            self._session_repo.touch_chat(chat_id)
+
             self._session_repo.save_response(
                 response_id=response_id,
                 session_id=session_id,
+                chat_id=chat_id,
                 model=model_name,
                 user_message=message,
                 answer=parsed_response.answer,
@@ -143,32 +181,35 @@ class ChatService:
                 h.model_dump() for h in (parsed_response.result or [])
             ]
             self._session_repo.save_milvus_hits(response_id, hits)
-            self._session_repo.add_session_tokens(
-                session_id,
+            self._session_repo.add_chat_tokens(
+                chat_id,
                 input_tokens or 0,
                 output_tokens or 0,
                 total_tokens or 0,
             )
-            totals = self._session_repo.get_session_tokens(session_id)
+            totals = self._session_repo.get_chat_tokens(chat_id)
             return TokenUsage(**totals)
         except Exception as e:
-            logger.warning(f"[CHAT_DB] Falha ao persistir sessão: {e}")
-            return default_session
+            logger.warning(f"[CHAT_DB] Falha ao persistir chat: {e}")
+            return default_chat
 
     def send_message(
         self,
         message: str,
         session_id: str,
         model: str | None = None,
+        chat_id: str | None = None,
     ) -> ChatResponse:
         response_id = str(uuid.uuid4())
         start_time = time.time()
         resolved_model = self._resolve_model(model)
 
+        resolved_chat_id = self._resolve_chat_id(session_id, chat_id)
+
         self._model_manager.ensure_loaded(resolved_model)
         agent = self._get_agent(resolved_model)
 
-        chat_history = self._get_or_create_chat(session_id)
+        chat_history = self._load_chat_history(resolved_chat_id)
         messages = chat_history + [HumanMessage(content=message)]
 
         result = agent.invoke({"messages": messages})
@@ -188,7 +229,8 @@ class ChatService:
             )
             parsed_response = self._parse_agent_output({"messages": result_messages})
 
-        self.chats[session_id] = result_messages
+        compact_history = self._compact_chat_history(result_messages)
+        self._chat_histories[resolved_chat_id] = compact_history
 
         response_time = time.time() - start_time
         confidence_score = 0.0
@@ -207,9 +249,10 @@ class ChatService:
             total_tokens=total_tokens,
         )
 
-        session_tokens = self._persist_session_data(
+        chat_tokens = self._persist_chat_data(
             response_id=response_id,
             session_id=session_id,
+            chat_id=resolved_chat_id,
             message=message,
             parsed_response=parsed_response,
             input_tokens=input_tokens,
@@ -223,6 +266,7 @@ class ChatService:
         log_chat_response(
             response_id=response_id,
             session_id=session_id,
+            chat_id=resolved_chat_id,
             model=resolved_model,
             user_message=message,
             answer=parsed_response.answer,
@@ -230,13 +274,13 @@ class ChatService:
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
                 "total_tokens": total_tokens,
-                "session_input_tokens": session_tokens.input_tokens,
-                "session_output_tokens": session_tokens.output_tokens,
-                "session_total_tokens": session_tokens.total_tokens,
+                "chat_input_tokens": chat_tokens.input_tokens,
+                "chat_output_tokens": chat_tokens.output_tokens,
+                "chat_total_tokens": chat_tokens.total_tokens,
                 "response_time_seconds": response_time,
                 "confidence_score": confidence_score,
                 "search_result_count": len(parsed_response.result) if parsed_response.result else 0,
-                "message_count": len(self.chats[session_id]),
+                "message_count": self._count_user_messages(compact_history),
             },
         )
 
@@ -247,11 +291,12 @@ class ChatService:
             response_time_seconds=response_time,
             confidence_score=confidence_score,
             session_id=session_id,
-            message_count=len(self.chats[session_id]),
+            chat_id=resolved_chat_id,
+            message_count=self._count_user_messages(compact_history),
             response_id=response_id,
             model=resolved_model,
             tokens=response_tokens,
-            session_tokens=session_tokens,
+            chat_tokens=chat_tokens,
         )
 
     @staticmethod
@@ -347,6 +392,36 @@ class ChatService:
                 and str(msg.content).startswith(_SEARCH_RETRY_NUDGE_PREFIX)
             )
         ]
+
+    @classmethod
+    def _compact_chat_history(cls, messages: List[Any]) -> List[Message]:
+        """Mantém só diálogo user/assistant; descarta tool calls e chunks RAG antigos."""
+        compact: List[Message] = []
+        for msg in messages:
+            if isinstance(msg, HumanMessage) or getattr(msg, "type", "") == "human":
+                if isinstance(msg, HumanMessage) and str(msg.content).startswith(
+                    _SEARCH_RETRY_NUDGE_PREFIX
+                ):
+                    continue
+                compact.append(HumanMessage(content=str(msg.content)))
+            elif isinstance(msg, AIMessage) or getattr(msg, "type", "") == "ai":
+                tool_calls = getattr(msg, "tool_calls", None) or []
+                content = cls._sanitize_answer(
+                    cls._strip_model_artifacts(cls._message_text_content(msg))
+                )
+                if tool_calls and not content:
+                    continue
+                if content:
+                    compact.append(AIMessage(content=content))
+        return compact
+
+    @staticmethod
+    def _count_user_messages(messages: List[Any]) -> int:
+        return sum(
+            1
+            for msg in messages
+            if isinstance(msg, HumanMessage) or getattr(msg, "type", "") == "human"
+        )
 
     @staticmethod
     def _message_text_content(msg: Any) -> str:

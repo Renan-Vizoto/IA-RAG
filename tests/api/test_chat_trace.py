@@ -31,6 +31,7 @@ class TestChatTraceEndpoint:
         chat_routes.session_repo.get_response.return_value = {
             "response_id": "resp-1",
             "session_id": "sess-1",
+            "chat_id": "chat-1",
             "model": "gemma4-unsloth",
             "user_message": "Qual o RMSE?",
             "answer": "O RMSE foi 89.1",
@@ -53,6 +54,7 @@ class TestChatTraceEndpoint:
 
         result = get_trace("resp-1")
         assert result.response_id == "resp-1"
+        assert result.chat_id == "chat-1"
         assert result.tokens.input_tokens == 10
         assert len(result.milvus_hits) == 1
         assert result.milvus_hits[0].collection == "mlflow_metadata"
