@@ -11,7 +11,7 @@ class SearchResult(BaseModel):
                     "distance": 0.12,
                     "text": "Modelo XGBoost treinado na camada gold. RMSE: 89.1.",
                     "source": "mlflow_metadata",
-                    "collection": "mlflow_metadata",
+                    "collection": "governance",
                 }
             ]
         }
@@ -27,7 +27,7 @@ class SearchResult(BaseModel):
     )
     source: str | None = Field(
         default=None,
-        description="Indexed source label, for example gold_governance or mlflow_metadata.",
+        description="Indexed source label, for example gold_governance or mlflow_report.",
     )
     collection: str | None = Field(
         default=None,
@@ -71,7 +71,7 @@ class ChatResponse(BaseModel):
                             "distance": 0.12,
                             "text": "Modelo XGBoost treinado na camada gold. RMSE: 89.1.",
                             "source": "mlflow_metadata",
-                            "collection": "mlflow_metadata",
+                            "collection": "governance",
                         }
                     ],
                     "agent_thoughts": "",

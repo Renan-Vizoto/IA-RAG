@@ -53,6 +53,7 @@ def train(storage: StorageBackend) -> dict:
     Treina XGBoost com MLflow tracking e salva artefatos no MinIO.
     Retorna dicionário com run_id e métricas.
     """
+    storage.ensure_bucket("mlflow-artifacts")
     _configure_mlflow()
 
     X_train, y_train, X_val, y_val, X_test, y_test, feat_cols = _load_gold(storage)

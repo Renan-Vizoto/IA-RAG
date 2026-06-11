@@ -14,7 +14,7 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5-2b-unsloth}
       OLLAMA_ALLOWED_MODELS: ${OLLAMA_ALLOWED_MODELS:-qwen3.5-2b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth}
       OLLAMA_TEMPERATURE: ${OLLAMA_TEMPERATURE:-0.2}
-      OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-128}
+      OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-1024}
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
       RAG_MAX_CONTEXT_CHUNKS: ${RAG_MAX_CONTEXT_CHUNKS:-3}
       RAG_MAX_CHUNK_CHARS: ${RAG_MAX_CHUNK_CHARS:-400}
@@ -47,8 +47,21 @@ services:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3333/health')"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 15s
+      retries: 12
+      start_period: 120s
+    networks:
+      - rag-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rag-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
     networks:
       - rag-network
 

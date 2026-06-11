@@ -18,7 +18,6 @@ class Settings(BaseSettings):
     MINIO_URL: str = "localhost:9000"
     MILVUS_URL: str = "http://localhost:19530"
     governance_collection: str = "governance"
-    mlflow_metadata_collection: str = "mlflow_metadata"
     chunk_size: int = 500
     chunk_overlap: int = 20
     think: bool = False

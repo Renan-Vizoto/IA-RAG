@@ -164,7 +164,7 @@ class TestChatSessionRepository:
         repo.save_milvus_hits("resp-1", [
             {
                 "id": "hit-1",
-                "collection": "mlflow_metadata",
+                "collection": "governance",
                 "source": "mlflow_metadata",
                 "distance": 0.2,
                 "text": "RMSE do modelo",

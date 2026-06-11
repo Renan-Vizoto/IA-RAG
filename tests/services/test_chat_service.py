@@ -559,6 +559,57 @@ class TestModelOutputParsing:
         assert parsed.answer == "Resposta direta."
         assert parsed.thinking == "cadeia de raciocínio separada"
 
+    def test_remove_thinking_tag_nao_fechada(self):
+        raw = "<think>\nO usuário pediu RMSE.\nMinha primeira ação deve ser chamar search"
+        assert ChatService._strip_model_artifacts(raw) == ""
+
+    def test_is_bogus_answer_detecta_prompt_vazado(self):
+        assert ChatService._is_bogus_answer(
+            "Minha primeira ação deve ser chamar a ferramenta search"
+        )
+
+
+class TestForcedSearch:
+
+    @patch("app.core.services.chat_service.log_chat_response")
+    @patch("app.core.services.chat_service.create_agent")
+    @patch("app.core.services.chat_service.create_chat_model")
+    def test_forca_busca_quando_modelo_nao_chama_tool(
+        self, mock_create_chat_model, mock_create_agent, mock_log,
+        mock_agent_result_sem_tool, service_factory,
+    ):
+        hits = [[{
+            "id": "1",
+            "distance": 0.2,
+            "entity": {
+                "text": "RMSE (erro quadrático médio) na validação: 0.3432.",
+                "source": "mlflow_metadata",
+            },
+        }]]
+
+        from langchain_core.messages import AIMessage
+
+        first = mock_agent_result_sem_tool
+        second = {
+            "messages": first["messages"] + [
+                AIMessage(
+                    content="O RMSE na validação foi 0.3432.",
+                    usage_metadata={"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
+                )
+            ]
+        }
+
+        agent = MagicMock()
+        agent.invoke.side_effect = [first, second]
+        mock_create_agent.return_value = agent
+
+        service = service_factory(search_fn=lambda _q: hits)
+        response = service.send_message("Qual o RMSE?", session_id="sess-1", chat_id="chat-1")
+
+        assert len(response.search_results) == 1
+        assert "0.3432" in response.answer
+        assert agent.invoke.call_count == 2
+
 
 class TestAnswerSanitization:
 

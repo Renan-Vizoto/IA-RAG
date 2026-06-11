@@ -17,12 +17,6 @@ class MilvusRepo(VectorRepository):
             data=data
         )
 
-    def upsert(self, collection: str, data: list[dict]):
-        self.client.upsert(
-            collection_name=collection,
-            data=data,
-        )
-
     def search(
         self,
         collection: str,
@@ -40,25 +34,6 @@ class MilvusRepo(VectorRepository):
             limit=limit,
             search_params={"metric_type": "COSINE"},
             output_fields=fields,
-        )
-
-    def list_indexed_run_ids(self, collection: str) -> dict[str, str]:
-        if not self.client.has_collection(collection):
-            return {}
-        results = self.client.query(
-            collection_name=collection,
-            filter='section == "overview"',
-            output_fields=["run_id", "content_hash"],
-        )
-        return {r["run_id"]: r["content_hash"] for r in results}
-
-    def delete_by_run_ids(self, collection: str, run_ids: list[str]):
-        if not run_ids or not self.client.has_collection(collection):
-            return
-        ids_expr = ", ".join(f'"{rid}"' for rid in run_ids)
-        self.client.delete(
-            collection_name=collection,
-            filter=f"run_id in [{ids_expr}]",
         )
 
     def drop_and_recreate(self, collection: str, schema_builder):

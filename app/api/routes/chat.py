@@ -26,7 +26,7 @@ class ChatRequest(BaseModel):
         json_schema_extra={
             "examples": [
                 {
-                    "message": "Qual modelo foi treinado e qual foi o RMSE?",
+                    "message": "Qual modelo foi treinado?",
                     "model": "gemma4-unsloth",
                     "chat_id": None,
                 },
@@ -98,6 +98,7 @@ def init_chat_dependencies(
     chatService = ChatService(
         tools=[search_tool],
         session_repo=session_repo,
+        search_fn=searchService.search,
     )
 
 

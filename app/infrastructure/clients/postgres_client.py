@@ -56,10 +56,15 @@ class MLflowSearchClient:
         if not runs:
             return "Nenhum run de treinamento encontrado no MLflow."
 
-        # Ordena pelo menor RMSE
-        runs_with_rmse = [r for r in runs if "metric_rmse" in r]
+        def rmse_value(run: dict) -> float | None:
+            for key in ("metric_val_rmse", "metric_test_rmse", "metric_rmse"):
+                if key in run:
+                    return run[key]
+            return None
+
+        runs_with_rmse = [r for r in runs if rmse_value(r) is not None]
         if runs_with_rmse:
-            best = min(runs_with_rmse, key=lambda r: r["metric_rmse"])
+            best = min(runs_with_rmse, key=rmse_value)
         else:
             best = runs[0]
 

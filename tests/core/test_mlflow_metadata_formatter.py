@@ -22,18 +22,27 @@ SAMPLE_RUN = {
 
 class TestMLflowMetadataFormatter:
 
-    def test_chunks_tem_tres_secoes(self):
+    def test_cada_metrica_gera_chunk_proprio(self):
         chunks = format_run_chunks(SAMPLE_RUN, is_best=True)
-        assert len(chunks) == 3
         sections = {c["section"] for c in chunks}
-        assert sections == {"overview", "metrics", "params"}
+        assert "overview" in sections
+        assert "params" in sections
+        assert "metric_rmse" in sections
+        assert "metric_mae" in sections
+        assert "metric_r2" in sections
+        assert "metric_test_rmse" in sections
+        assert "metrics" not in sections
+        assert len(chunks) == 6
 
     def test_ids_deterministicos(self):
         chunks = format_run_chunks(SAMPLE_RUN)
         ids = [c["id"] for c in chunks]
         assert ids == [
             "mlflow:abc123:overview",
-            "mlflow:abc123:metrics",
+            "mlflow:abc123:metric_rmse",
+            "mlflow:abc123:metric_mae",
+            "mlflow:abc123:metric_r2",
+            "mlflow:abc123:metric_test_rmse",
             "mlflow:abc123:params",
         ]
 
@@ -42,10 +51,11 @@ class TestMLflowMetadataFormatter:
         assert "Melhor run de treinamento (menor RMSE)" in overview
         assert "treinamento do modelo" in overview.lower() or "machine learning" in overview.lower()
 
-    def test_metrics_tem_semantica_rmse(self):
-        metrics = next(c for c in format_run_chunks(SAMPLE_RUN) if c["section"] == "metrics")
-        assert "erro quadrático médio" in metrics["text"]
-        assert "desempenho do modelo" in metrics["text"].lower()
+    def test_chunk_rmse_tem_semantica(self):
+        rmse = next(c for c in format_run_chunks(SAMPLE_RUN) if c["section"] == "metric_rmse")
+        assert "erro quadrático médio" in rmse["text"]
+        assert "89.1" in rmse["text"]
+        assert "desempenho do modelo" in rmse["text"].lower()
 
     def test_params_tem_hiperparametros(self):
         params = next(c for c in format_run_chunks(SAMPLE_RUN) if c["section"] == "params")
@@ -60,7 +70,20 @@ class TestMLflowMetadataFormatter:
 
     def test_pick_best_rmse(self):
         runs = [
-            {"run_id": "r1", "metric_rmse": 100},
-            {"run_id": "r2", "metric_rmse": 80},
+            {"run_id": "r1", "metric_val_rmse": 100},
+            {"run_id": "r2", "metric_val_rmse": 80},
         ]
         assert pick_best_rmse_run_id(runs) == "r2"
+
+    def test_val_rmse_chunk(self):
+        run = {
+            "run_id": "abc123",
+            "status": "FINISHED",
+            "start_time": "2025-01-15",
+            "metric_val_rmse": 0.3432,
+            "metric_val_mae": 0.2568,
+            "param_algorithm": "XGBoost",
+        }
+        rmse = next(c for c in format_run_chunks(run) if c["section"] == "metric_val_rmse")
+        assert "0.3432" in rmse["text"]
+        assert "erro quadrático médio" in rmse["text"]

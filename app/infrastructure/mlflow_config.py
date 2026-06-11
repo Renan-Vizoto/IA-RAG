@@ -1,6 +1,9 @@
 import os
 import mlflow
 from app.infrastructure.configs import settings
+from app.infrastructure.clients.bucket_client import client as minio_client
+
+MLFLOW_ARTIFACTS_BUCKET = "mlflow-artifacts"
 
 
 def _configure_env():
@@ -9,8 +12,14 @@ def _configure_env():
     os.environ["AWS_SECRET_ACCESS_KEY"] = settings.AWS_SECRET_ACCESS_KEY
 
 
+def _ensure_mlflow_artifacts_bucket():
+    if not minio_client.bucket_exists(MLFLOW_ARTIFACTS_BUCKET):
+        minio_client.make_bucket(MLFLOW_ARTIFACTS_BUCKET)
+
+
 def initialize_mlflow(experiment: str = "RAG-Chat-Agent"):
     _configure_env()
+    _ensure_mlflow_artifacts_bucket()
     mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
     mlflow.set_experiment(experiment)
     return mlflow
@@ -18,6 +27,7 @@ def initialize_mlflow(experiment: str = "RAG-Chat-Agent"):
 
 def initialize_training_mlflow():
     _configure_env()
+    _ensure_mlflow_artifacts_bucket()
     mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
     mlflow.set_experiment(settings.MLFLOW_EXPERIMENT_TRAINING)
     return mlflow

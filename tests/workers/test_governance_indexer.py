@@ -95,9 +95,26 @@ def mock_schema_builder():
 
 
 @pytest.fixture
-def indexer(mock_storage_with_docs, mock_repo, mock_embedder, mock_schema_builder):
+def mock_mlflow_client():
+    client = MagicMock()
+    client.search_training_runs.return_value = [
+        {
+            "run_id": "abc123",
+            "status": "FINISHED",
+            "start_time": "2025-01-15",
+            "metric_val_rmse": 0.3432,
+            "metric_val_mae": 0.2568,
+            "param_algorithm": "XGBoost",
+        }
+    ]
+    return client
+
+
+@pytest.fixture
+def indexer(mock_storage_with_docs, mock_mlflow_client, mock_repo, mock_embedder, mock_schema_builder):
     return GovernanceIndexer(
         storage=mock_storage_with_docs,
+        client=mock_mlflow_client,
         repo=mock_repo,
         embedder=mock_embedder,
         schema_builder=mock_schema_builder,
@@ -144,13 +161,13 @@ class TestSplit:
 
 class TestGovernanceIndexer:
 
-    def test_le_tres_documentos_markdown(self, indexer, mock_storage_with_docs):
-        """Indexer deve ler governance_silver.md, governance_gold.md e mlflow_report.md."""
+    def test_le_tres_documentos_markdown_e_runs_mlflow(self, indexer, mock_storage_with_docs):
+        """Indexer deve ler os 3 markdowns e os chunks dos runs MLflow."""
         chunks, sources = indexer._collect_chunks()
-        assert len(set(sources)) == 3
         assert "silver_governance" in sources
         assert "gold_governance" in sources
         assert "mlflow_report" in sources
+        assert "mlflow_metadata" in sources
 
     def test_chunks_contem_conteudo_dos_docs(self, indexer):
         """Chunks devem conter texto dos documentos de governança."""
@@ -167,20 +184,24 @@ class TestGovernanceIndexer:
         assert "bronze_manifest" not in sources
         assert "gold_metadata" not in sources
 
-    def test_documento_ausente_ignorado_com_aviso(self, mock_repo, mock_embedder, mock_schema_builder):
+    def test_documento_ausente_ignorado_com_aviso(self, mock_repo, mock_embedder, mock_schema_builder, mock_mlflow_client):
         """Quando um doc está ausente, o indexer continua sem lançar exceção."""
         storage = MagicMock(spec=StorageBackend)
         storage.get_object.side_effect = Exception("Não encontrado")
 
         indexer = GovernanceIndexer(
-            storage=storage, repo=mock_repo, embedder=mock_embedder,
-            schema_builder=mock_schema_builder, collection="governance",
+            storage=storage,
+            client=mock_mlflow_client,
+            repo=mock_repo,
+            embedder=mock_embedder,
+            schema_builder=mock_schema_builder,
+            collection="governance",
         )
         chunks, sources = indexer._collect_chunks()
-        assert chunks == []
-        assert sources == []
+        assert chunks
+        assert "mlflow_metadata" in sources
 
-    def test_dois_docs_presentes_um_ausente(self, mock_repo, mock_embedder, mock_schema_builder):
+    def test_dois_docs_presentes_um_ausente(self, mock_repo, mock_embedder, mock_schema_builder, mock_mlflow_client):
         """Quando só 2 de 3 docs existem, os 2 são indexados."""
         storage = MagicMock(spec=StorageBackend)
         docs = {
@@ -197,8 +218,12 @@ class TestGovernanceIndexer:
         storage.get_object.side_effect = get_object
 
         indexer = GovernanceIndexer(
-            storage=storage, repo=mock_repo, embedder=mock_embedder,
-            schema_builder=mock_schema_builder, collection="governance",
+            storage=storage,
+            client=mock_mlflow_client,
+            repo=mock_repo,
+            embedder=mock_embedder,
+            schema_builder=mock_schema_builder,
+            collection="governance",
         )
         chunks, sources = indexer._collect_chunks()
         assert "silver_governance" in sources
@@ -222,7 +247,9 @@ class TestGovernanceIndexer:
             assert "text" in item
             assert "text_vector" in item
             assert "source" in item
-            assert item["source"] in ["silver_governance", "gold_governance", "mlflow_report"]
+            assert item["source"] in [
+                "silver_governance", "gold_governance", "mlflow_report", "mlflow_metadata",
+            ]
 
     @pytest.mark.asyncio
     async def test_run_nao_reindexar_se_timestamp_igual(self, indexer, mock_repo):
@@ -236,13 +263,19 @@ class TestGovernanceIndexer:
 
     @pytest.mark.asyncio
     async def test_run_sem_documentos_nao_chama_insert(self, mock_repo, mock_embedder, mock_schema_builder):
-        """run() não deve chamar insert se não há documentos."""
+        """run() não deve chamar insert se não há documentos nem runs MLflow."""
         storage = MagicMock(spec=StorageBackend)
         storage.get_object.side_effect = Exception("Não encontrado")
+        client = MagicMock()
+        client.search_training_runs.return_value = []
 
         indexer = GovernanceIndexer(
-            storage=storage, repo=mock_repo, embedder=mock_embedder,
-            schema_builder=mock_schema_builder, collection="governance",
+            storage=storage,
+            client=client,
+            repo=mock_repo,
+            embedder=mock_embedder,
+            schema_builder=mock_schema_builder,
+            collection="governance",
         )
         await indexer.run()
         mock_repo.insert.assert_not_called()
@@ -268,8 +301,12 @@ class TestStartWorker:
         scheduler_instance = MagicMock()
         MockScheduler.return_value = scheduler_instance
 
+        client = MagicMock()
+        client.search_training_runs.return_value = []
+
         indexer = start_worker(
             storage=mock_storage_with_docs,
+            client=client,
             repo=mock_repo,
             embedder=mock_embedder,
             schema_builder=mock_schema_builder,

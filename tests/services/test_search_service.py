@@ -9,9 +9,11 @@ from app.core.services.search_service import SearchService
 @pytest.fixture
 def mock_repo():
     repo = MagicMock()
-    repo.search.side_effect = [
-        [[{"id": "1", "distance": 0.3, "entity": {"text": "gov doc", "source": "gold_governance"}}]],
-        [[{"id": "2", "distance": 0.1, "entity": {"text": "mlflow run", "source": "mlflow_metadata", "run_id": "r1"}}]],
+    repo.search.return_value = [
+        [
+            {"id": "1", "distance": 0.1, "entity": {"text": "mlflow run", "source": "mlflow_metadata"}},
+            {"id": "2", "distance": 0.3, "entity": {"text": "gov doc", "source": "gold_governance"}},
+        ]
     ]
     return repo
 
@@ -25,17 +27,16 @@ def mock_embedder():
 
 class TestSearchService:
 
-    def test_merge_ordena_por_distancia(self, mock_repo, mock_embedder):
+    def test_retorna_hits_da_collection_governance(self, mock_repo, mock_embedder):
         service = SearchService(mock_repo, mock_embedder)
         result = service.search("qual o rmse?")
 
         assert len(result) == 1
         assert len(result[0]) == 2
         assert result[0][0]["distance"] == 0.1
-        assert result[0][1]["distance"] == 0.3
 
-    def test_busca_em_duas_collections(self, mock_repo, mock_embedder):
+    def test_busca_apenas_governance(self, mock_repo, mock_embedder):
         service = SearchService(mock_repo, mock_embedder)
         service.search("treinamento")
 
-        assert mock_repo.search.call_count == 2
+        mock_repo.search.assert_called_once()

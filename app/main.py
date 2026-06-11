@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,12 +8,10 @@ from app.infrastructure.clients.bucket_client import client as minio_client
 from app.infrastructure.clients.postgres_client import MLflowSearchClient
 from app.infrastructure.configs import settings
 from app.infrastructure.implementations.schema_builders.milvus_schema import MilvusSchemaBuilder
-from app.infrastructure.implementations.schema_builders.mlflow_metadata_schema import MLflowMetadataSchemaBuilder
 from app.infrastructure.implementations.embbeding.MiniLML12_embbeding import MiniLML12_Embbeding
 from app.infrastructure.repositories.milvus_repo import MilvusRepo
 from app.pipeline.storage import MinioStorage
 from app.core.workers.governance_indexer import start_worker as start_governance_indexer
-from app.core.workers.mlflow_metadata_indexer import start_worker as start_mlflow_indexer
 from app.infrastructure.repositories.chat_session_repo import ChatSessionRepository
 from app.api.docs import (
     OPENAPI_TAGS,
@@ -29,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 milvus_repo = MilvusRepo(milvusClient)
 schema_builder = MilvusSchemaBuilder(milvusClient)
-mlflow_schema_builder = MLflowMetadataSchemaBuilder(milvusClient)
 embedder = MiniLML12_Embbeding()
 storage = MinioStorage(minio_client)
 mlflow_client = MLflowSearchClient()
@@ -50,35 +48,35 @@ async def lifespan(app: FastAPI):
     if not milvusClient.has_collection(settings.governance_collection):
         schema_builder.build(settings.governance_collection)
 
-    if not milvusClient.has_collection(settings.mlflow_metadata_collection):
-        mlflow_schema_builder.build(settings.mlflow_metadata_collection)
-
     governance_indexer = start_governance_indexer(
         storage=storage,
+        client=mlflow_client,
         repo=milvus_repo,
         embedder=embedder,
         schema_builder=schema_builder,
         collection=settings.governance_collection,
     )
 
-    mlflow_indexer = start_mlflow_indexer(
-        client=mlflow_client,
-        repo=milvus_repo,
-        embedder=embedder,
-        schema_builder=mlflow_schema_builder,
-        collection=settings.mlflow_metadata_collection,
-    )
+    async def _bootstrap_indexer() -> None:
+        try:
+            await governance_indexer.run()
+        except Exception as e:
+            logger.error(f"[GOVERNANCE] Falha na indexação inicial: {e}", exc_info=True)
+        try:
+            embedder.embbed_it(["warmup"])
+            logger.info("[EMBEDDER] Modelo de embedding aquecido.")
+        except Exception as e:
+            logger.warning(f"[EMBEDDER] Falha no warmup: {e}")
 
-    await governance_indexer.run()
-    await mlflow_indexer.run()
-
-    try:
-        embedder.embbed_it(["warmup"])
-        logger.info("[EMBEDDER] Modelo de embedding aquecido.")
-    except Exception as e:
-        logger.warning(f"[EMBEDDER] Falha no warmup: {e}")
+    bootstrap_task = asyncio.create_task(_bootstrap_indexer())
 
     yield
+
+    bootstrap_task.cancel()
+    try:
+        await bootstrap_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(

@@ -6,18 +6,67 @@ _HEADER = (
     "Metadados de treinamento MLflow — Pipeline Dutch Energy — consumo elétrico holandês."
 )
 
+_METRIC_LABELS = {
+    "val_rmse": "RMSE (erro quadrático médio) na validação",
+    "val_mae": "MAE (erro absoluto médio) na validação",
+    "val_r2": "R² (coeficiente de determinação) na validação",
+    "val_mape": "MAPE (erro percentual absoluto médio) na validação",
+    "rmse": "RMSE (erro quadrático médio) na validação",
+    "mae": "MAE (erro absoluto médio) na validação",
+    "r2": "R² (coeficiente de determinação) na validação",
+    "mape": "MAPE (erro percentual absoluto médio) na validação",
+    "test_rmse": "RMSE (erro quadrático médio) no teste",
+    "test_mae": "MAE (erro absoluto médio) no teste",
+    "test_r2": "R² (coeficiente de determinação) no teste",
+    "test_mape": "MAPE no conjunto de teste",
+    "train_duration_sec": "Duração do treinamento em segundos",
+}
+
+_METRIC_ORDER = (
+    "val_rmse", "val_mae", "val_r2", "val_mape",
+    "rmse", "mae", "r2", "mape",
+    "test_rmse", "test_mae", "test_r2", "test_mape",
+    "train_duration_sec",
+)
+
 
 def content_hash(run: dict) -> str:
     payload = {k: v for k, v in sorted(run.items()) if k != "start_time"}
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
+def _rmse_value(run: dict) -> float | None:
+    for key in ("metric_val_rmse", "metric_test_rmse", "metric_rmse"):
+        if key in run:
+            return run[key]
+    return None
+
+
 def pick_best_rmse_run_id(runs: list[dict]) -> str | None:
-    runs_with_rmse = [r for r in runs if "metric_rmse" in r]
+    runs_with_rmse = [r for r in runs if _rmse_value(r) is not None]
     if not runs_with_rmse:
         return None
-    best = min(runs_with_rmse, key=lambda r: r["metric_rmse"])
+    best = min(runs_with_rmse, key=lambda r: _rmse_value(r))
     return best.get("run_id")
+
+
+def _format_metric_chunk(
+    run_id: str,
+    algorithm: str,
+    metric_key: str,
+    value,
+    is_best: bool,
+) -> str:
+    label = _METRIC_LABELS.get(metric_key, metric_key)
+    best_note = "Melhor run de treinamento. " if is_best else ""
+    return (
+        f"{_HEADER}\n"
+        f"{best_note}"
+        f"Desempenho do modelo treinado — Run ID: {run_id}.\n"
+        f"Modelo: {algorithm}. Métrica de avaliação do treinamento.\n"
+        f"{label}: {value}.\n"
+        f"Qual foi o desempenho do modelo? Métrica {metric_key}, {label}."
+    )
 
 
 def format_run_chunks(run: dict, is_best: bool = False) -> list[dict]:
@@ -40,38 +89,6 @@ def format_run_chunks(run: dict, is_best: bool = False) -> list[dict]:
         f"Treinamento do modelo, experimento MLflow, modelo treinado, run de machine learning."
     )
 
-    metric_lines = []
-    val_metrics = {k: v for k, v in metrics.items() if not k.startswith("test_") and k != "train_duration_sec"}
-    test_metrics = {k: v for k, v in metrics.items() if k.startswith("test_")}
-
-    labels = {
-        "rmse": "RMSE (erro quadrático médio) na validação",
-        "mae": "MAE (erro absoluto médio) na validação",
-        "r2": "R² (coeficiente de determinação) na validação",
-        "mape": "MAPE (erro percentual absoluto médio) na validação",
-        "test_rmse": "RMSE (erro quadrático médio) no teste",
-        "test_mae": "MAE (erro absoluto médio) no teste",
-        "test_r2": "R² (coeficiente de determinação) no teste",
-        "test_mape": "MAPE no conjunto de teste",
-    }
-
-    for key, val in val_metrics.items():
-        label = labels.get(key, key)
-        metric_lines.append(f"- {label}: {val}")
-
-    for key, val in test_metrics.items():
-        label = labels.get(key, key)
-        metric_lines.append(f"- {label}: {val}")
-
-    metrics_text = "\n".join(metric_lines) if metric_lines else "- Métricas não disponíveis."
-
-    metrics_chunk = (
-        f"{_HEADER}\n"
-        f"Desempenho do modelo treinado — Run ID: {run_id}.\n"
-        f"Qual foi o desempenho do modelo? Quão preciso foi o treinamento?\n"
-        f"Métricas de avaliação do modelo:\n{metrics_text}"
-    )
-
     param_lines = [f"- {k}: {v}" for k, v in sorted(params.items())]
     params_text = "\n".join(param_lines) if param_lines else "- Parâmetros não disponíveis."
     n_features = params.get("n_features")
@@ -89,11 +106,17 @@ def format_run_chunks(run: dict, is_best: bool = False) -> list[dict]:
         f"{params_text}"
     )
 
-    sections = [
-        ("overview", overview),
-        ("metrics", metrics_chunk),
-        ("params", params_chunk),
-    ]
+    sections: list[tuple[str, str]] = [("overview", overview)]
+
+    ordered_keys = [k for k in _METRIC_ORDER if k in metrics]
+    ordered_keys.extend(sorted(k for k in metrics if k not in _METRIC_ORDER))
+
+    for metric_key in ordered_keys:
+        section = f"metric_{metric_key}"
+        text = _format_metric_chunk(run_id, algorithm, metric_key, metrics[metric_key], is_best)
+        sections.append((section, text))
+
+    sections.append(("params", params_chunk))
 
     return [
         {

@@ -32,6 +32,11 @@ _PIPELINE_SEARCH_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _SEARCH_RETRY_NUDGE_PREFIX = "INSTRUÇÃO INTERNA: chame a ferramenta search"
+_FORCED_SEARCH_PREFIX = "Contexto da busca semântica (use somente isto):"
+_EMPTY_SEARCH_ANSWER = (
+    "Não encontrei essa informação nos dados disponíveis. "
+    "Posso ajudar com outra pergunta sobre o pipeline?"
+)
 _BOGUS_TOOL_ANSWERS = frozenset({"search"})
 _QWEN_THINKING_TAGS = ("think", "redacted_thinking")
 _GEMMA_THOUGHT_PATTERN = re.compile(
@@ -68,12 +73,14 @@ class ChatService:
         tools: List[Callable[..., Any]],
         session_repo: Optional[ChatSessionRepository] = None,
         ollama_model_manager: OllamaModelManager | None = None,
+        search_fn: Callable[[str], Any] | None = None,
     ):
         self._chat_histories: Dict[str, List[Message]] = {}
         self._default_model = settings.OLLAMA_MODEL
         self._allowed_models = set(settings.ollama_allowed_models)
         self._agents: dict[str, Any] = {}
         self._tools = tools
+        self._search_fn = search_fn
         self._system_prompt = load_prompt("rag_system")
         self._session_repo = session_repo
         self._model_manager = ollama_model_manager or model_manager
@@ -215,22 +222,56 @@ class ChatService:
         result = agent.invoke({"messages": messages})
         result_messages = result.get("messages", messages)
         parsed_response = self._parse_agent_output({"messages": result_messages})
+        used_forced_search = False
 
-        if self._should_retry_search(message, result_messages, parsed_response):
-            logger.info("[CHAT] Modelo não chamou search; tentando novamente com instrução explícita.")
-            nudge = HumanMessage(
-                content=(
-                    f"{_SEARCH_RETRY_NUDGE_PREFIX} com query relacionada a: {message}"
+        if self._requires_search(message) and not parsed_response.result:
+            forced_hits = self._force_search(message)
+            if forced_hits:
+                logger.info("[CHAT] Busca automática — modelo não chamou search.")
+                used_forced_search = True
+                context = self._format_hits_for_context(forced_hits)
+                follow_up = messages + [
+                    HumanMessage(
+                        content=(
+                            f"{_FORCED_SEARCH_PREFIX}\n{context}\n\n"
+                            f"Responda em português, no máximo 3 frases curtas: {message}"
+                        )
+                    )
+                ]
+                result = agent.invoke({"messages": follow_up})
+                result_messages = result.get("messages", follow_up)
+                parsed_response = self._parse_agent_output({"messages": result_messages})
+                parsed_response = parsed_response.model_copy(update={"result": forced_hits})
+            elif self._should_retry_search(message, result_messages, parsed_response):
+                logger.info("[CHAT] Modelo não chamou search; tentando novamente com instrução explícita.")
+                nudge = HumanMessage(
+                    content=(
+                        f"{_SEARCH_RETRY_NUDGE_PREFIX} com query relacionada a: {message}"
+                    )
                 )
-            )
-            result = agent.invoke({"messages": messages + [nudge]})
-            result_messages = self._strip_search_retry_nudge(
-                result.get("messages", messages + [nudge])
-            )
-            parsed_response = self._parse_agent_output({"messages": result_messages})
+                result = agent.invoke({"messages": messages + [nudge]})
+                result_messages = self._strip_search_retry_nudge(
+                    result.get("messages", messages + [nudge])
+                )
+                parsed_response = self._parse_agent_output({"messages": result_messages})
 
-        compact_history = self._compact_chat_history(result_messages)
-        self._chat_histories[resolved_chat_id] = compact_history
+        if self._is_bogus_answer(parsed_response.answer):
+            if parsed_response.result:
+                parsed_response = parsed_response.model_copy(
+                    update={"answer": self._fallback_answer_from_hits(parsed_response.result)}
+                )
+            else:
+                parsed_response = parsed_response.model_copy(
+                    update={"answer": _EMPTY_SEARCH_ANSWER}
+                )
+
+        if used_forced_search:
+            self._chat_histories[resolved_chat_id] = chat_history + [
+                HumanMessage(content=message),
+                AIMessage(content=parsed_response.answer),
+            ]
+        else:
+            self._chat_histories[resolved_chat_id] = self._compact_chat_history(result_messages)
 
         response_time = time.time() - start_time
         confidence_score = 0.0
@@ -306,14 +347,55 @@ class ChatService:
         text = re.sub(r"\s{2,}", " ", text)
         return text.strip()
 
-    @staticmethod
-    def _sanitize_answer(answer: str) -> str:
+    @classmethod
+    def _sanitize_answer(cls, answer: str) -> str:
+        answer = cls._strip_model_artifacts(answer)
         answer = _SOURCE_TAG_PATTERN.sub("", answer)
         answer = _RUN_ID_LINE_PATTERN.sub("", answer)
         answer = _HEX_ID_PATTERN.sub("", answer)
         answer = re.sub(r"\s{2,}", " ", answer)
         answer = re.sub(r"\s+([.,;])", r"\1", answer)
         return answer.strip()
+
+    def _force_search(self, query: str) -> list[MilvusHit]:
+        if not self._search_fn:
+            return []
+        raw = self._search_fn(query)
+        redacted = self.redact_raw_search_hits(raw)
+        return self._hits_from_raw_search(redacted)
+
+    @staticmethod
+    def _format_hits_for_context(hits: list[MilvusHit]) -> str:
+        return "\n\n---\n\n".join(hit.text for hit in hits if hit.text)
+
+    @staticmethod
+    def _fallback_answer_from_hits(hits: list[MilvusHit]) -> str:
+        for hit in hits:
+            text = hit.text.lower()
+            if "rmse" in text or "erro quadrático" in text:
+                for line in hit.text.splitlines():
+                    if "rmse" in line.lower() or "erro quadrático" in line.lower():
+                        value = line.split(":", 1)[-1].strip().rstrip(".")
+                        if value:
+                            return f"O modelo treinado é XGBoost e o RMSE na validação foi {value}."
+        snippet = hits[0].text.splitlines()[-1] if hits else ""
+        return snippet[:280] if snippet else _EMPTY_SEARCH_ANSWER
+
+    @classmethod
+    def _is_bogus_answer(cls, answer: str) -> bool:
+        cleaned = cls._strip_model_artifacts(answer).strip()
+        if not cleaned:
+            return True
+        if cleaned.lower() in _BOGUS_TOOL_ANSWERS:
+            return True
+        lower = cleaned.lower()
+        if any(f"<{tag}>" in lower for tag in _QWEN_THINKING_TAGS):
+            return True
+        if "chame a ferramenta" in lower and "search" in lower:
+            return True
+        if "minha primeira ação" in lower or "query será" in lower:
+            return True
+        return False
 
     @staticmethod
     def _extract_token_usage(messages: List[Any]) -> tuple[int | None, int | None, int | None]:
@@ -339,12 +421,19 @@ class ChatService:
             total_tokens = input_tokens + output_tokens
         return input_tokens, output_tokens, total_tokens
 
+    @staticmethod
+    def _is_internal_human_message(content: str) -> bool:
+        return (
+            content.startswith(_SEARCH_RETRY_NUDGE_PREFIX)
+            or content.startswith(_FORCED_SEARCH_PREFIX)
+        )
+
     def _get_current_turn_messages(self, messages: List[Any]) -> List[Any]:
         last_human_idx = -1
         for i, msg in enumerate(messages):
             if isinstance(msg, HumanMessage) or getattr(msg, "type", "") == "human":
-                if isinstance(msg, HumanMessage) and str(msg.content).startswith(
-                    _SEARCH_RETRY_NUDGE_PREFIX
+                if isinstance(msg, HumanMessage) and self._is_internal_human_message(
+                    str(msg.content)
                 ):
                     continue
                 last_human_idx = i
@@ -382,14 +471,14 @@ class ChatService:
             return True
         return not self._turn_used_search(messages)
 
-    @staticmethod
-    def _strip_search_retry_nudge(messages: List[Any]) -> List[Any]:
+    @classmethod
+    def _strip_search_retry_nudge(cls, messages: List[Any]) -> List[Any]:
         return [
             msg
             for msg in messages
             if not (
                 isinstance(msg, HumanMessage)
-                and str(msg.content).startswith(_SEARCH_RETRY_NUDGE_PREFIX)
+                and cls._is_internal_human_message(str(msg.content))
             )
         ]
 
@@ -399,8 +488,8 @@ class ChatService:
         compact: List[Message] = []
         for msg in messages:
             if isinstance(msg, HumanMessage) or getattr(msg, "type", "") == "human":
-                if isinstance(msg, HumanMessage) and str(msg.content).startswith(
-                    _SEARCH_RETRY_NUDGE_PREFIX
+                if isinstance(msg, HumanMessage) and cls._is_internal_human_message(
+                    str(msg.content)
                 ):
                     continue
                 compact.append(HumanMessage(content=str(msg.content)))
@@ -445,6 +534,7 @@ class ChatService:
         text = _GEMMA_THOUGHT_PATTERN.sub("", text)
         for tag in _QWEN_THINKING_TAGS:
             text = re.sub(rf"<{tag}>.*?</{tag}>", "", text, flags=re.DOTALL)
+            text = re.sub(rf"<{tag}>.*", "", text, flags=re.DOTALL)
         text = _QWEN_TOOL_CALL_PATTERN.sub("", text)
         text = _GEMMA_TOOL_CALL_PATTERN.sub("", text)
         return text.strip()
@@ -508,8 +598,6 @@ class ChatService:
 
     @staticmethod
     def _infer_collection(source: str | None) -> str:
-        if source == "mlflow_metadata":
-            return settings.mlflow_metadata_collection
         return settings.governance_collection
 
     def _dict_to_milvus_hit(self, hit: dict) -> MilvusHit | None:
