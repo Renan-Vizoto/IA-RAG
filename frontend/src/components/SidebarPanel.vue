@@ -47,10 +47,8 @@
       <div class="sidebar__section-label">Modelo</div>
       <div class="model-select-wrap">
         <select class="model-select" :value="selectedModel" @change="$emit('change-model', $event.target.value)">
-          <option value="">padrão (qwen3.5 0.8b)</option>
-          <option value="qwen3.5-0.8b-unsloth">qwen3.5-0.8b-unsloth</option>
+          <option value="qwen3.5-2b-unsloth">qwen3.5-2b-unsloth (padrão)</option>
           <option value="gemma4-unsloth">gemma4-unsloth</option>
-          <option value="qwen3.5-9b-unsloth">qwen3.5-9b-unsloth</option>
         </select>
         <svg class="select-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
       </div>

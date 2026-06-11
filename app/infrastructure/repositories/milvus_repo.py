@@ -41,3 +41,12 @@ class MilvusRepo(VectorRepository):
         if self.client.has_collection(collection):
             self.client.drop_collection(collection)
         schema_builder.build(collection)
+
+    def replace_all(self, collection: str, schema_builder, data: list):
+        """Substitui o conteúdo da collection sem recriar índice (janela menor de indisponibilidade)."""
+        if not self.client.has_collection(collection):
+            schema_builder.build(collection)
+        else:
+            self.client.delete(collection_name=collection, filter='id != ""')
+        if data:
+            self.insert(collection, data)

@@ -33,19 +33,18 @@
         </p>
       </div>
 
-      <!-- Empty chat -->
-      <div v-else-if="messages.length === 0 && !loading" class="empty-chat">
-        <div class="empty-chat__icon">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        </div>
-        <p>Comece a conversa enviando uma mensagem.</p>
-      </div>
-
-      <!-- Messages -->
+      <!-- Messages (single container avoids unmounting the list mid-response) -->
       <div v-else class="messages-list">
+        <div v-if="messages.length === 0 && !loading" class="empty-chat">
+          <div class="empty-chat__icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <p>Comece a conversa enviando uma mensagem.</p>
+        </div>
+
         <ChatMessage
-          v-for="(msg, i) in messages"
-          :key="msg.id || i"
+          v-for="msg in messages"
+          :key="msg.id"
           :msg="msg"
           :delay="0"
         />
@@ -132,12 +131,15 @@ function autoResize() {
   })
 }
 
-watch(() => props.messages.length, async () => {
-  await nextTick()
-  if (scrollEl.value) {
-    scrollEl.value.scrollTop = scrollEl.value.scrollHeight
-  }
-})
+watch(
+  () => [props.messages.length, props.loading],
+  async () => {
+    await nextTick()
+    if (scrollEl.value) {
+      scrollEl.value.scrollTop = scrollEl.value.scrollHeight
+    }
+  },
+)
 </script>
 
 <style scoped>
@@ -271,6 +273,12 @@ watch(() => props.messages.length, async () => {
   flex-direction: column;
   gap: 18px;
   padding-bottom: 8px;
+  flex: 1;
+}
+
+.messages-list .empty-chat {
+  flex: 1;
+  min-height: 200px;
 }
 
 /* Input */

@@ -128,13 +128,20 @@ class ChatService:
         self._chat_histories[chat_id] = history
         return history
 
+    _DEFAULT_CHAT_TITLES = frozenset({"new chat", "novo chat"})
+
     def _maybe_auto_title(self, chat_id: str, message: str) -> None:
         if not self._session_repo:
             return
         try:
-            if self._session_repo.count_messages(chat_id) == 2:
-                title = message.strip()[:50] or "New chat"
-                self._session_repo.update_chat_title(chat_id, title)
+            chat = self._session_repo.get_chat(chat_id)
+            if not chat:
+                return
+            current = (chat.get("title") or "").strip()
+            if current.lower() not in self._DEFAULT_CHAT_TITLES:
+                return
+            title = message.strip()[:50] or current
+            self._session_repo.update_chat_title(chat_id, title)
         except Exception as e:
             logger.warning(f"[CHAT_DB] Falha ao definir título do chat: {e}")
 
@@ -266,12 +273,14 @@ class ChatService:
                 )
 
         if used_forced_search:
-            self._chat_histories[resolved_chat_id] = chat_history + [
+            updated_history = chat_history + [
                 HumanMessage(content=message),
                 AIMessage(content=parsed_response.answer),
             ]
         else:
-            self._chat_histories[resolved_chat_id] = self._compact_chat_history(result_messages)
+            updated_history = self._compact_chat_history(result_messages)
+        self._chat_histories[resolved_chat_id] = updated_history
+        user_message_count = self._count_user_messages(updated_history)
 
         response_time = time.time() - start_time
         confidence_score = 0.0
@@ -321,9 +330,16 @@ class ChatService:
                 "response_time_seconds": response_time,
                 "confidence_score": confidence_score,
                 "search_result_count": len(parsed_response.result) if parsed_response.result else 0,
-                "message_count": self._count_user_messages(compact_history),
+                "message_count": user_message_count,
             },
         )
+
+        chat_row = (
+            self._session_repo.get_chat(resolved_chat_id)
+            if self._session_repo
+            else None
+        )
+        chat_title = (chat_row or {}).get("title") or "New chat"
 
         return ChatResponse(
             search_results=[r.model_dump() for r in parsed_response.result] if parsed_response.result else [],
@@ -333,7 +349,8 @@ class ChatService:
             confidence_score=confidence_score,
             session_id=session_id,
             chat_id=resolved_chat_id,
-            message_count=self._count_user_messages(compact_history),
+            title=chat_title,
+            message_count=user_message_count,
             response_id=response_id,
             model=resolved_model,
             tokens=response_tokens,
@@ -378,6 +395,19 @@ class ChatService:
                         value = line.split(":", 1)[-1].strip().rstrip(".")
                         if value:
                             return f"O modelo treinado é XGBoost e o RMSE na validação foi {value}."
+        for hit in hits:
+            lower = hit.text.lower()
+            if any(
+                token in lower
+                for token in ("limpeza", "limpos", "removido", "registros finais", "após limpeza")
+            ):
+                lines = [
+                    line.strip()
+                    for line in hit.text.splitlines()
+                    if line.strip() and not line.strip().startswith("|---")
+                ]
+                if lines:
+                    return " ".join(lines[:5])[:400]
         snippet = hits[0].text.splitlines()[-1] if hits else ""
         return snippet[:280] if snippet else _EMPTY_SEARCH_ANSWER
 
@@ -635,9 +665,14 @@ class ChatService:
         return raw
 
     def _hits_from_raw_search(self, raw: Any) -> list[MilvusHit]:
+        return self.hits_from_search(raw)
+
+    @classmethod
+    def hits_from_search(cls, raw: Any) -> list[MilvusHit]:
         hits: list[MilvusHit] = []
-        for item in self._flatten_hits(raw if isinstance(raw, list) else [raw]):
-            parsed = self._dict_to_milvus_hit(item)
+        service = cls(tools=[])
+        for item in service._flatten_hits(raw if isinstance(raw, list) else [raw]):
+            parsed = service._dict_to_milvus_hit(item)
             if parsed:
                 hits.append(parsed)
         return hits

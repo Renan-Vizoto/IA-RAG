@@ -1,4 +1,3 @@
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -57,26 +56,18 @@ async def lifespan(app: FastAPI):
         collection=settings.governance_collection,
     )
 
-    async def _bootstrap_indexer() -> None:
-        try:
-            await governance_indexer.run()
-        except Exception as e:
-            logger.error(f"[GOVERNANCE] Falha na indexação inicial: {e}", exc_info=True)
-        try:
-            embedder.embbed_it(["warmup"])
-            logger.info("[EMBEDDER] Modelo de embedding aquecido.")
-        except Exception as e:
-            logger.warning(f"[EMBEDDER] Falha no warmup: {e}")
+    try:
+        await governance_indexer.run()
+    except Exception as e:
+        logger.error(f"[GOVERNANCE] Falha na indexação inicial: {e}", exc_info=True)
 
-    bootstrap_task = asyncio.create_task(_bootstrap_indexer())
+    try:
+        embedder.embbed_it(["warmup"])
+        logger.info("[EMBEDDER] Modelo de embedding aquecido.")
+    except Exception as e:
+        logger.warning(f"[EMBEDDER] Falha no warmup: {e}")
 
     yield
-
-    bootstrap_task.cancel()
-    try:
-        await bootstrap_task
-    except asyncio.CancelledError:
-        pass
 
 
 app = FastAPI(

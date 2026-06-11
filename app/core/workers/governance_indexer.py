@@ -15,6 +15,7 @@ Dispara re-indexação quando os documentos ou os runs MLflow mudarem.
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -79,8 +80,7 @@ class GovernanceIndexer:
                 for i, text in enumerate(chunks)
             ]
 
-            self._repo.drop_and_recreate(self._collection, self._schema_builder)
-            self._repo.insert(self._collection, data)
+            self._repo.replace_all(self._collection, self._schema_builder, data)
 
             self._last_indexed = fingerprint
             logger.info(
@@ -118,7 +118,7 @@ class GovernanceIndexer:
             try:
                 raw = self._storage.get_object(bucket, obj_path)
                 text = raw.read().decode("utf-8")
-                for chunk in _split(text, _MAX_CHUNK):
+                for chunk in _split_markdown(text, _MAX_CHUNK):
                     all_chunks.append(chunk)
                     all_sources.append(source_label)
                 logger.info(f"[GOVERNANCE] Lido: {bucket}/{obj_path}")
@@ -149,6 +149,25 @@ class GovernanceIndexer:
 def _runs_fingerprint(runs: list[dict]) -> str:
     payload = [{k: v for k, v in sorted(run.items())} for run in runs]
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _split_markdown(text: str, max_len: int) -> list[str]:
+    """Divide markdown por seções (##) e depois por tamanho, preservando contexto semântico."""
+    sections: list[str] = []
+    current: list[str] = []
+    for line in text.splitlines():
+        if re.match(r"#{2,3}\s", line) and current:
+            sections.append("\n".join(current))
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        sections.append("\n".join(current))
+
+    chunks: list[str] = []
+    for section in sections:
+        chunks.extend(_split(section, max_len))
+    return chunks
 
 
 def _split(text: str, max_len: int) -> list[str]:

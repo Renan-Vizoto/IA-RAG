@@ -80,6 +80,7 @@ class ChatResponse(BaseModel):
                     "confidence_score": 0.88,
                     "session_id": "8b2d3ff5-2f4a-4a1e-b23b-4d61b67a61bb",
                     "chat_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    "title": "Qual modelo foi treinado?",
                     "message_count": 4,
                     "response_id": "64682936-5f57-4772-baf8-dd6f546a4c98",
                     "model": "gemma4-unsloth",
@@ -113,6 +114,9 @@ class ChatResponse(BaseModel):
     )
     session_id: str = Field(description="Chat session ID from the HttpOnly cookie.")
     chat_id: str = Field(description="Active chat thread ID for this conversation.")
+    title: str = Field(
+        description="Current chat thread title after persistence and auto-title rules."
+    )
     message_count: int = Field(
         description="Number of user messages in this chat thread."
     )

@@ -10,7 +10,12 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import numpy as np
 import pytest
 
-from app.core.workers.governance_indexer import GovernanceIndexer, _split, start_worker
+from app.core.workers.governance_indexer import (
+    GovernanceIndexer,
+    _split,
+    _split_markdown,
+    start_worker,
+)
 from app.pipeline.storage import StorageBackend
 
 
@@ -77,7 +82,7 @@ def mock_storage_with_docs():
 @pytest.fixture
 def mock_repo():
     repo = MagicMock()
-    repo.drop_and_recreate.return_value = None
+    repo.replace_all.return_value = None
     repo.insert.return_value = None
     return repo
 
@@ -153,6 +158,12 @@ class TestSplit:
     def test_texto_vazio(self):
         chunks = _split("", 900)
         assert chunks == [""]
+
+    def test_split_markdown_preserva_secao_limpeza(self):
+        chunks = _split_markdown(SILVER_DOC, 900)
+        limpeza_chunks = [c for c in chunks if "limpeza" in c.lower()]
+        assert limpeza_chunks
+        assert any("### Limpeza de Dados" in c for c in limpeza_chunks)
 
 
 # ──────────────────────────────────────────────
@@ -235,14 +246,14 @@ class TestGovernanceIndexer:
         """run() deve embedar os chunks e inserir no Milvus."""
         await indexer.run()
         mock_embedder.embbed_it.assert_called_once()
-        mock_repo.drop_and_recreate.assert_called_once_with("governance", indexer._schema_builder)
-        mock_repo.insert.assert_called_once()
+        mock_repo.replace_all.assert_called_once()
+        assert mock_repo.replace_all.call_args[0][0] == "governance"
 
     @pytest.mark.asyncio
     async def test_run_insere_dados_com_source_correto(self, indexer, mock_repo):
         """Dados inseridos no Milvus devem ter os campos text, text_vector e source."""
         await indexer.run()
-        inserted = mock_repo.insert.call_args[0][1]
+        inserted = mock_repo.replace_all.call_args[0][2]
         for item in inserted:
             assert "text" in item
             assert "text_vector" in item
@@ -255,11 +266,11 @@ class TestGovernanceIndexer:
     async def test_run_nao_reindexar_se_timestamp_igual(self, indexer, mock_repo):
         """run() não deve re-indexar quando o timestamp não mudou."""
         await indexer.run()
-        assert mock_repo.insert.call_count == 1
+        assert mock_repo.replace_all.call_count == 1
 
         # Segunda chamada com mesmo timestamp
         await indexer.run()
-        assert mock_repo.insert.call_count == 1  # não aumentou
+        assert mock_repo.replace_all.call_count == 1  # não aumentou
 
     @pytest.mark.asyncio
     async def test_run_sem_documentos_nao_chama_insert(self, mock_repo, mock_embedder, mock_schema_builder):

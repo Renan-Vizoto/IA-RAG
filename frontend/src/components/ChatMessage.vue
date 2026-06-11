@@ -37,13 +37,13 @@
       </div>
 
       <!-- Metadata (confidence, time, model) -->
-      <div v-if="msg.role === 'assistant' && msg.response_time_seconds != null" class="msg__meta">
+      <div v-if="msg.role === 'assistant' && formatTime(msg.response_time_seconds)" class="msg__meta">
         <span v-if="msg.confidence_score != null">
           <span class="meta-label">conf</span>
-          <span :class="confClass(msg.confidence_score)">{{ (msg.confidence_score * 100).toFixed(0) }}%</span>
+          <span :class="confClass(msg.confidence_score)">{{ (Number(msg.confidence_score) * 100).toFixed(0) }}%</span>
         </span>
         <span class="meta-sep" />
-        <span><span class="meta-label">tempo</span> {{ msg.response_time_seconds.toFixed(1) }}s</span>
+        <span><span class="meta-label">tempo</span> {{ formatTime(msg.response_time_seconds) }}</span>
         <span class="meta-sep" />
         <span><span class="meta-label">modelo</span> {{ msg.model || '—' }}</span>
         <span v-if="msg.tokens" class="meta-sep" />
@@ -64,9 +64,16 @@ const props = defineProps({
 
 const showSources = ref(false)
 
+function formatTime(seconds) {
+  const value = Number(seconds)
+  if (!Number.isFinite(value)) return null
+  return `${value.toFixed(1)}s`
+}
+
 function renderText(text) {
-  if (!text) return ''
-  return text
+  if (text == null) return ''
+  const safe = String(text)
+  return safe
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

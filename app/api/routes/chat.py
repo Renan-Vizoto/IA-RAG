@@ -82,7 +82,8 @@ def _build_search_tool(service: SearchService):
         métricas (RMSE, MAE, R²), hiperparâmetros ou etapas do pipeline.
         """
         raw = service.search(query)
-        return ChatService.redact_raw_search_hits(raw)
+        redacted = ChatService.redact_raw_search_hits(raw)
+        return [hit.model_dump() for hit in ChatService.hits_from_search(redacted)]
 
     return search
 

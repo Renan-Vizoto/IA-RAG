@@ -44,6 +44,7 @@ class TestChatModelParam:
             confidence_score=0.0,
             session_id="sess-1",
             chat_id="chat-1",
+            title="New chat",
             message_count=1,
             response_id="r1",
             model="gemma4-unsloth",
