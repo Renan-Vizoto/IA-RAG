@@ -27,24 +27,36 @@ class TestMLflowMetadataFormatter:
         sections = {c["section"] for c in chunks}
         assert "overview" in sections
         assert "params" in sections
+        assert "metrics_summary" in sections
         assert "metric_rmse" in sections
         assert "metric_mae" in sections
         assert "metric_r2" in sections
         assert "metric_test_rmse" in sections
         assert "metrics" not in sections
-        assert len(chunks) == 6
+        assert len(chunks) == 7
 
     def test_ids_deterministicos(self):
         chunks = format_run_chunks(SAMPLE_RUN)
         ids = [c["id"] for c in chunks]
         assert ids == [
             "mlflow:abc123:overview",
+            "mlflow:abc123:metrics_summary",
             "mlflow:abc123:metric_rmse",
             "mlflow:abc123:metric_mae",
             "mlflow:abc123:metric_r2",
             "mlflow:abc123:metric_test_rmse",
             "mlflow:abc123:params",
         ]
+
+    def test_metrics_summary_agrega_todas_metricas(self):
+        summary = next(
+            c for c in format_run_chunks(SAMPLE_RUN, is_best=True)
+            if c["section"] == "metrics_summary"
+        )
+        assert "Modelos treinados e métricas" in summary["text"]
+        assert "89.1" in summary["text"]
+        assert "39.5" in summary["text"]
+        assert "0.74" in summary["text"]
 
     def test_overview_marca_melhor_run(self):
         overview = format_run_chunks(SAMPLE_RUN, is_best=True)[0]["text"]

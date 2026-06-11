@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     OLLAMA_URL: str = "http://localhost:11435"
     OLLAMA_MODEL: str = "qwen3.5-2b-unsloth"
     OLLAMA_ALLOWED_MODELS: str = (
-        "qwen3.5-2b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth"
+        "qwen3.5-2b-unsloth,gemma4-unsloth"
     )
     OLLAMA_TEMPERATURE: float = 0.2
     OLLAMA_NUM_PREDICT: int = 1024

@@ -387,7 +387,111 @@ class TestSearchRetry:
 
     def test_requires_search_detecta_pergunta_sobre_pipeline(self):
         assert ChatService._requires_search("Qual modelo foi treinado?")
+        assert ChatService._requires_search("Qual foi o pré-processamento realizado nos dados?")
         assert not ChatService._requires_search("olá, quem é você?")
+
+    def test_is_identity_question(self):
+        assert ChatService._is_identity_question("Quem é você?")
+        assert ChatService._is_identity_question("oi, quem é vc?")
+        assert not ChatService._is_identity_question("Qual o RMSE?")
+
+    @patch("app.core.services.chat_service.log_chat_response")
+    @patch("app.core.services.chat_service.create_agent")
+    @patch("app.core.services.chat_service.create_chat_model")
+    def test_identity_nao_chama_agente(
+        self, mock_create_chat_model, mock_create_agent, mock_log,
+        mock_session_repo, service_factory,
+    ):
+        service = service_factory(session_repo=mock_session_repo)
+        response = service.send_message("Quem é você?", session_id="sess-1", chat_id="chat-1")
+
+        mock_create_agent.assert_not_called()
+        assert "WattTrack" in response.answer
+        assert "Não encontrei" not in response.answer
+        assert response.search_results == []
+
+    @patch("app.core.services.chat_service.log_chat_response")
+    @patch("app.core.services.chat_service.create_agent")
+    @patch("app.core.services.chat_service.create_chat_model")
+    def test_metricas_usa_busca_estruturada_sem_agente(
+        self, mock_create_chat_model, mock_create_agent, mock_log,
+        mock_session_repo, service_factory,
+    ):
+        summary_hit = {
+            "id": "summary-1",
+            "distance": 0.2,
+            "entity": {
+                "text": (
+                    "Modelos treinados e métricas utilizadas no pipeline Dutch Energy.\n"
+                    "Modelo treinado: XGBoost.\n"
+                    "Métricas de avaliação do treinamento:\n"
+                    "- RMSE (erro quadrático médio) na validação: 0.34\n"
+                    "- MAE (erro absoluto médio) na validação: 0.25\n"
+                    "- MAPE no conjunto de teste: 26.6"
+                ),
+                "source": "mlflow_metadata",
+            },
+        }
+        service = service_factory(
+            session_repo=mock_session_repo,
+            search_fn=lambda _q, limit=None: [[summary_hit]],
+        )
+        response = service.send_message(
+            "Quais modelos foram treinados e quais métricas foram utilizadas?",
+            session_id="sess-1",
+            chat_id="chat-1",
+        )
+
+        mock_create_agent.assert_not_called()
+        assert "XGBoost" in response.answer
+        assert "RMSE" in response.answer
+        assert "MAE" in response.answer
+        assert "MAPE" in response.answer
+        assert "train_duration" not in response.answer.lower()
+
+    def test_build_metrics_answer_lista_todas(self):
+        hits = ChatService.hits_from_search([[
+            {
+                "id": "1",
+                "distance": 0.2,
+                "entity": {
+                    "text": (
+                        "Modelos treinados e métricas utilizadas.\n"
+                        "Modelo treinado: XGBoost.\n"
+                        "Métricas de avaliação do treinamento:\n"
+                        "- RMSE (erro quadrático médio) na validação: 0.34\n"
+                        "- MAE (erro absoluto médio) na validação: 0.25\n"
+                        "- MAPE no conjunto de teste: 26.6"
+                    ),
+                    "source": "mlflow_metadata",
+                },
+            }
+        ]])
+        answer = ChatService._build_metrics_answer(hits)
+        assert "RMSE" in answer
+        assert "MAE" in answer
+        assert "MAPE" in answer
+
+    def test_build_preprocessing_answer_inclui_gold(self):
+        hits = ChatService.hits_from_search([[
+            {
+                "id": "1",
+                "distance": 0.2,
+                "entity": {
+                    "text": (
+                        "Pré-processamento na camada Gold.\n"
+                        "3. Pré-processamento Pós-Split.\n"
+                        "- Target Encoding: city, purchase_area, net_manager\n"
+                        "- Normalização: StandardScaler"
+                    ),
+                    "source": "gold_governance",
+                },
+            }
+        ]])
+        answer = ChatService._build_preprocessing_answer(hits)
+        assert "Target Encoding" in answer
+        assert "StandardScaler" in answer
+        assert "R²" not in answer
 
     def test_turn_used_search_detecta_tool_message(self, service_factory):
         from langchain_core.messages import AIMessage, HumanMessage, ToolMessage

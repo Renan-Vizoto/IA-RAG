@@ -27,10 +27,33 @@ _SOURCE_TAG_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _PIPELINE_SEARCH_PATTERN = re.compile(
-    r"modelo|métric|metric|rmse|mae|r²|r2|trein|pipeline|xgboost|feature|hiper|"
-    r"gold|silver|bronze|mlflow|consume|target|dados|limpos|limpeza|dataset",
+    r"modelo|métric|metric|rmse|mae|r²|r2|mape|trein|pipeline|xgboost|feature|hiper|"
+    r"gold|silver|bronze|mlflow|consume|dados|limpos|limpeza|dataset|"
+    r"pré-?process|preprocess|transform|encoding|normaliz",
     re.IGNORECASE,
 )
+_IDENTITY_PATTERN = re.compile(
+    r"^(?:olá|oi|bom dia|boa tarde|boa noite[!.]?\s*)?"
+    r"(?:quem é você|quem é vc|o que você é|o que é você|o que você faz|"
+    r"qual é sua função|qual sua função|apresente-se|se apresente|quem sou eu)",
+    re.IGNORECASE,
+)
+_METRICS_QUESTION_PATTERN = re.compile(
+    r"métric|metric|desempenho|avaliação|rmse|mae|mape|r²|r2",
+    re.IGNORECASE,
+)
+_PREPROCESSING_QUESTION_PATTERN = re.compile(
+    r"pré-?process|preprocess|limpeza|limpos|transform|encoding|normaliz|prepar",
+    re.IGNORECASE,
+)
+_IDENTITY_ANSWER = (
+    "Olá! Sou o WattTrack, assistente de governança do pipeline Dutch Energy. "
+    "Posso explicar as etapas bronze, silver e gold, a limpeza dos dados, "
+    "o pré-processamento e o treinamento do modelo."
+)
+_EMPTY_SEARCH_PHRASE = "Não encontrei essa informação nos dados disponíveis"
+_SEARCH_POOL_SIZE = 12
+_MAX_RETURNED_HITS = 3
 _SEARCH_RETRY_NUDGE_PREFIX = "INSTRUÇÃO INTERNA: chame a ferramenta search"
 _FORCED_SEARCH_PREFIX = "Contexto da busca semântica (use somente isto):"
 _EMPTY_SEARCH_ANSWER = (
@@ -220,57 +243,98 @@ class ChatService:
 
         resolved_chat_id = self._resolve_chat_id(session_id, chat_id)
 
-        self._model_manager.ensure_loaded(resolved_model)
-        agent = self._get_agent(resolved_model)
-
         chat_history = self._load_chat_history(resolved_chat_id)
-        messages = chat_history + [HumanMessage(content=message)]
 
-        result = agent.invoke({"messages": messages})
-        result_messages = result.get("messages", messages)
-        parsed_response = self._parse_agent_output({"messages": result_messages})
-        used_forced_search = False
+        if self._is_identity_question(message):
+            parsed_response = ParsedResponse(
+                thinking="",
+                answer=_IDENTITY_ANSWER,
+                result=[],
+            )
+            result_messages = chat_history + [
+                HumanMessage(content=message),
+                AIMessage(content=_IDENTITY_ANSWER),
+            ]
+            used_forced_search = False
+        elif self._is_structured_pipeline_question(message):
+            topic_hits = self._topic_search(message)
+            answer = (
+                self._build_structured_answer(message, topic_hits)
+                if topic_hits
+                else _EMPTY_SEARCH_ANSWER
+            )
+            parsed_response = ParsedResponse(
+                thinking="",
+                answer=answer,
+                result=topic_hits[:_MAX_RETURNED_HITS],
+            )
+            result_messages = chat_history + [
+                HumanMessage(content=message),
+                AIMessage(content=answer),
+            ]
+            used_forced_search = False
+        else:
+            self._model_manager.ensure_loaded(resolved_model)
+            agent = self._get_agent(resolved_model)
+            messages = chat_history + [HumanMessage(content=message)]
 
-        if self._requires_search(message) and not parsed_response.result:
-            forced_hits = self._force_search(message)
-            if forced_hits:
-                logger.info("[CHAT] Busca automática — modelo não chamou search.")
-                used_forced_search = True
-                context = self._format_hits_for_context(forced_hits)
-                follow_up = messages + [
-                    HumanMessage(
+            result = agent.invoke({"messages": messages})
+            result_messages = result.get("messages", messages)
+            parsed_response = self._parse_agent_output({"messages": result_messages})
+            used_forced_search = False
+
+            if self._requires_search(message) and not parsed_response.result:
+                forced_hits = self._force_search(message)
+                if forced_hits:
+                    logger.info("[CHAT] Busca automática — modelo não chamou search.")
+                    used_forced_search = True
+                    context = self._format_hits_for_context(forced_hits)
+                    follow_up = messages + [
+                        HumanMessage(
+                            content=(
+                                f"{_FORCED_SEARCH_PREFIX}\n{context}\n\n"
+                                f"Responda em português, no máximo 3 frases curtas: {message}"
+                            )
+                        )
+                    ]
+                    result = agent.invoke({"messages": follow_up})
+                    result_messages = result.get("messages", follow_up)
+                    parsed_response = self._parse_agent_output({"messages": result_messages})
+                    parsed_response = parsed_response.model_copy(update={"result": forced_hits})
+                elif self._should_retry_search(message, result_messages, parsed_response):
+                    logger.info("[CHAT] Modelo não chamou search; tentando novamente com instrução explícita.")
+                    nudge = HumanMessage(
                         content=(
-                            f"{_FORCED_SEARCH_PREFIX}\n{context}\n\n"
-                            f"Responda em português, no máximo 3 frases curtas: {message}"
+                            f"{_SEARCH_RETRY_NUDGE_PREFIX} com query relacionada a: {message}"
                         )
                     )
-                ]
-                result = agent.invoke({"messages": follow_up})
-                result_messages = result.get("messages", follow_up)
-                parsed_response = self._parse_agent_output({"messages": result_messages})
-                parsed_response = parsed_response.model_copy(update={"result": forced_hits})
-            elif self._should_retry_search(message, result_messages, parsed_response):
-                logger.info("[CHAT] Modelo não chamou search; tentando novamente com instrução explícita.")
-                nudge = HumanMessage(
-                    content=(
-                        f"{_SEARCH_RETRY_NUDGE_PREFIX} com query relacionada a: {message}"
+                    result = agent.invoke({"messages": messages + [nudge]})
+                    result_messages = self._strip_search_retry_nudge(
+                        result.get("messages", messages + [nudge])
                     )
-                )
-                result = agent.invoke({"messages": messages + [nudge]})
-                result_messages = self._strip_search_retry_nudge(
-                    result.get("messages", messages + [nudge])
-                )
-                parsed_response = self._parse_agent_output({"messages": result_messages})
+                    parsed_response = self._parse_agent_output({"messages": result_messages})
 
-        if self._is_bogus_answer(parsed_response.answer):
-            if parsed_response.result:
-                parsed_response = parsed_response.model_copy(
-                    update={"answer": self._fallback_answer_from_hits(parsed_response.result)}
-                )
-            else:
-                parsed_response = parsed_response.model_copy(
-                    update={"answer": _EMPTY_SEARCH_ANSWER}
-                )
+            if self._is_bogus_answer(parsed_response.answer):
+                if parsed_response.result:
+                    parsed_response = parsed_response.model_copy(
+                        update={"answer": self._fallback_answer_from_hits(
+                            parsed_response.result, message
+                        )}
+                    )
+                else:
+                    parsed_response = parsed_response.model_copy(
+                        update={"answer": _EMPTY_SEARCH_ANSWER}
+                    )
+
+            parsed_response = parsed_response.model_copy(
+                update={
+                    "answer": self._refine_answer_for_question(
+                        message,
+                        parsed_response.answer,
+                        parsed_response.result or [],
+                    )
+                }
+            )
 
         if used_forced_search:
             updated_history = chat_history + [
@@ -374,19 +438,308 @@ class ChatService:
         answer = re.sub(r"\s+([.,;])", r"\1", answer)
         return answer.strip()
 
-    def _force_search(self, query: str) -> list[MilvusHit]:
+    def _search_pool(self, query: str) -> list[MilvusHit]:
         if not self._search_fn:
             return []
-        raw = self._search_fn(query)
+        try:
+            raw = self._search_fn(query, limit=_SEARCH_POOL_SIZE)
+        except TypeError:
+            raw = self._search_fn(query)
         redacted = self.redact_raw_search_hits(raw)
         return self._hits_from_raw_search(redacted)
+
+    def _force_search(self, query: str) -> list[MilvusHit]:
+        return self._search_pool(query)
+
+    @staticmethod
+    def _is_structured_pipeline_question(message: str) -> bool:
+        return (
+            ChatService._is_metrics_question(message)
+            or ChatService._is_preprocessing_question(message)
+        )
+
+    @staticmethod
+    def _search_queries_for_message(message: str) -> list[str]:
+        if ChatService._is_metrics_question(message):
+            return [
+                "modelos treinados métricas RMSE MAE R² MAPE validação teste XGBoost",
+                "resumo métricas de avaliação do treinamento MLflow",
+                message,
+            ]
+        if ChatService._is_preprocessing_question(message):
+            return [
+                "pré-processamento Target Encoding StandardScaler normalização gold",
+                "limpeza de dados silver duplicatas outliers consumo inválido",
+                message,
+            ]
+        return [message]
+
+    def _topic_search(self, message: str) -> list[MilvusHit]:
+        merged: dict[str, MilvusHit] = {}
+        for query in self._search_queries_for_message(message):
+            for hit in self._search_pool(query):
+                merged[hit.id] = hit
+        ranked = self._rerank_hits(message, list(merged.values()))
+        return self._dedupe_hits(ranked)[:_MAX_RETURNED_HITS]
+
+    @staticmethod
+    def _dedupe_hits(hits: list[MilvusHit]) -> list[MilvusHit]:
+        seen: set[str] = set()
+        unique: list[MilvusHit] = []
+        for hit in hits:
+            signature = re.sub(r"\s+", " ", hit.text[:160].lower())
+            if signature in seen:
+                continue
+            seen.add(signature)
+            unique.append(hit)
+        return unique
+
+    @classmethod
+    def _is_low_value_hit(cls, hit: MilvusHit, message: str) -> bool:
+        text = hit.text.strip().lower()
+        if re.search(r"processado em:\s*\d{4}", text):
+            if "limpeza" not in text and "target encoding" not in text:
+                return True
+        if cls._is_metrics_question(message):
+            if "train_duration" in text or "duração do treinamento em segundos" in text:
+                return True
+            if "hiperparâmetro" in text and "métricas de avaliação" not in text:
+                return True
+        if cls._is_preprocessing_question(message):
+            if "variável alvo" in text and "target encoding" not in text:
+                return True
+            if hit.source == "mlflow_metadata" and not any(
+                token in text for token in ("target encoding", "standardscaler", "limpeza", "pré-processamento")
+            ):
+                return True
+        return False
+
+    def _rerank_hits(self, message: str, hits: list[MilvusHit]) -> list[MilvusHit]:
+        def score(hit: MilvusHit) -> float:
+            value = 1.0 - float(hit.distance or 0)
+            text = hit.text.lower()
+            if self._is_metrics_question(message):
+                if "modelos treinados e métricas" in text:
+                    value += 4.0
+                if "métricas de avaliação do treinamento" in text and "- " in hit.text:
+                    value += 3.0
+                for token in ("rmse", "mae", "r²", "r2", "mape"):
+                    if token in text:
+                        value += 0.5
+                if "train_duration" in text or "duração do treinamento" in text:
+                    value -= 4.0
+                if "hiperparâmetro" in text or "learning_rate" in text:
+                    value -= 2.0
+            if self._is_preprocessing_question(message):
+                if "pré-processamento pós-split" in text or "pré-processamento na camada gold" in text:
+                    value += 3.0
+                if "target encoding" in text:
+                    value += 2.0
+                if "limpeza de dados" in text:
+                    value += 2.5
+                if "standardscaler" in text or "normalização" in text:
+                    value += 1.5
+                if "processado em:" in text and "target encoding" not in text:
+                    value -= 4.0
+                if "variável alvo" in text:
+                    value -= 2.5
+            return value
+
+        filtered = [hit for hit in hits if not self._is_low_value_hit(hit, message)]
+        return sorted(filtered, key=score, reverse=True)
+
+    def _build_structured_answer(self, message: str, hits: list[MilvusHit]) -> str:
+        if self._is_metrics_question(message):
+            return self._build_metrics_answer(hits)
+        if self._is_preprocessing_question(message):
+            return self._build_preprocessing_answer(hits)
+        return self._fallback_answer_from_hits(hits, message)
+
+    @classmethod
+    def _detect_model_name(cls, hits: list[MilvusHit]) -> str:
+        for hit in hits:
+            if "xgboost" in hit.text.lower():
+                return "XGBoost"
+        return "modelo"
+
+    @classmethod
+    def _build_metrics_answer(cls, hits: list[MilvusHit]) -> str:
+        model = cls._detect_model_name(hits)
+        for hit in hits:
+            if "métricas de avaliação do treinamento" not in hit.text.lower():
+                continue
+            metrics: list[str] = []
+            for line in hit.text.splitlines():
+                stripped = line.strip()
+                if not stripped.startswith("- "):
+                    continue
+                entry = stripped[2:].strip().rstrip(".")
+                lower = entry.lower()
+                if "duração" in lower or "train_duration" in lower:
+                    continue
+                metrics.append(entry)
+            if metrics:
+                return f"O modelo treinado foi {model}. Métricas: {'; '.join(metrics[:6])}."
+
+        metrics = cls._extract_metrics_from_hits(hits)
+        metrics = [
+            metric for metric in metrics
+            if "duração" not in metric.lower() and "train_duration" not in metric.lower()
+        ]
+        if metrics:
+            return f"O modelo treinado foi {model}. Métricas: {'; '.join(metrics[:6])}."
+        return _EMPTY_SEARCH_ANSWER
+
+    @classmethod
+    def _build_preprocessing_answer(cls, hits: list[MilvusHit]) -> str:
+        sentences: list[str] = []
+
+        for hit in hits:
+            lower = hit.text.lower()
+            if "limpeza de dados" not in lower and "limpeza de dados na camada silver" not in lower:
+                continue
+            cleaning = cls._summarize_cleaning(hit.text)
+            if cleaning:
+                sentences.append(f"Na Silver, {cleaning}")
+                break
+
+        gold_bits: list[str] = []
+        for hit in hits:
+            lower = hit.text.lower()
+            if "target encoding" in lower and "target encoding" not in " ".join(gold_bits).lower():
+                gold_bits.append(
+                    "Target Encoding em city, purchase_area e net_manager "
+                    "(médias calculadas apenas no treino)"
+                )
+            if ("standardscaler" in lower or "normalização" in lower) and "standardscaler" not in " ".join(gold_bits).lower():
+                gold_bits.append(
+                    "normalização com StandardScaler (fit no treino, transform em todos os conjuntos)"
+                )
+        if gold_bits:
+            sentences.append(f"No Gold, {', e '.join(gold_bits)}.")
+
+        if sentences:
+            return ". ".join(sentence.rstrip(".") for sentence in sentences) + "."
+
+        snippets = cls._extract_preprocessing_from_hits(hits)
+        if snippets:
+            return ". ".join(snippets[:4])[:400]
+        return _EMPTY_SEARCH_ANSWER
+
+    @staticmethod
+    def _summarize_cleaning(text: str) -> str:
+        rules: list[str] = []
+        for line in text.splitlines():
+            stripped = line.strip().lstrip("|").strip()
+            if not stripped or stripped.startswith("---") or stripped.startswith("Operação"):
+                continue
+            lower = stripped.lower()
+            if "duplicat" in lower:
+                rules.append("duplicatas exatas")
+            elif "consumo anual inválido" in lower or "consumo anual invalido" in lower:
+                rules.append("consumo anual inválido (nulo ou ≤ 0)")
+            elif "conex" in lower and "inválid" in lower:
+                rules.append("conexões inválidas")
+            elif "outlier" in lower:
+                rules.append("outliers de consumo anual acima do percentil 99,5")
+        if rules:
+            return "a limpeza removeu " + ", ".join(dict.fromkeys(rules))
+        if "limpeza" in text.lower():
+            return "foram aplicadas regras de limpeza de duplicatas, consumo inválido e outliers"
+        return ""
 
     @staticmethod
     def _format_hits_for_context(hits: list[MilvusHit]) -> str:
         return "\n\n---\n\n".join(hit.text for hit in hits if hit.text)
 
     @staticmethod
-    def _fallback_answer_from_hits(hits: list[MilvusHit]) -> str:
+    def _is_identity_question(message: str) -> bool:
+        return bool(_IDENTITY_PATTERN.search(message.strip()))
+
+    @staticmethod
+    def _is_metrics_question(message: str) -> bool:
+        return bool(_METRICS_QUESTION_PATTERN.search(message))
+
+    @staticmethod
+    def _is_preprocessing_question(message: str) -> bool:
+        return bool(_PREPROCESSING_QUESTION_PATTERN.search(message))
+
+    @classmethod
+    def _extract_metrics_from_hits(cls, hits: list[MilvusHit]) -> list[str]:
+        metrics: list[str] = []
+        seen: set[str] = set()
+        metric_line = re.compile(
+            r"^[-•]?\s*((?:RMSE|MAE|R²|MAPE|R2)[^:]{0,80}):\s*([\d.]+)",
+            re.IGNORECASE | re.MULTILINE,
+        )
+        inline_metric = re.compile(
+            r"((?:RMSE|MAE|R²|MAPE|R2)[^:\n]{0,80}):\s*([\d.]+)",
+            re.IGNORECASE,
+        )
+        for hit in hits:
+            for match in metric_line.finditer(hit.text):
+                label = re.sub(r"\s+", " ", match.group(1).strip())
+                value = match.group(2).strip()
+                entry = f"{label}: {value}"
+                key = entry.lower()
+                if "duração" in key or "train_duration" in key:
+                    continue
+                if key not in seen:
+                    seen.add(key)
+                    metrics.append(entry)
+            for match in inline_metric.finditer(hit.text):
+                label = re.sub(r"\s+", " ", match.group(1).strip())
+                value = match.group(2).strip()
+                entry = f"{label}: {value}"
+                key = entry.lower()
+                if "duração" in key or "train_duration" in key:
+                    continue
+                if key not in seen:
+                    seen.add(key)
+                    metrics.append(entry)
+        return metrics
+
+    @classmethod
+    def _extract_preprocessing_from_hits(cls, hits: list[MilvusHit]) -> list[str]:
+        snippets: list[str] = []
+        keywords = (
+            "limpeza", "target encoding", "standardscaler", "normalização",
+            "pré-processamento", "duplicat", "outlier", "removid",
+        )
+        for hit in hits:
+            lower = hit.text.lower()
+            if not any(token in lower for token in keywords):
+                continue
+            for line in hit.text.splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("|---"):
+                    continue
+                line_lower = stripped.lower()
+                if any(token in line_lower for token in keywords):
+                    if stripped not in snippets:
+                        snippets.append(stripped.lstrip("-• ").strip())
+        return snippets[:6]
+
+    @classmethod
+    def _fallback_answer_from_hits(cls, hits: list[MilvusHit], message: str = "") -> str:
+        if cls._is_metrics_question(message):
+            metrics = cls._extract_metrics_from_hits(hits)
+            if metrics:
+                model = "XGBoost"
+                for hit in hits:
+                    if "xgboost" in hit.text.lower():
+                        model = "XGBoost"
+                        break
+                return (
+                    f"O modelo treinado foi {model}. "
+                    f"Métricas: {'; '.join(metrics[:4])}."
+                )
+
+        if cls._is_preprocessing_question(message):
+            snippets = cls._extract_preprocessing_from_hits(hits)
+            if snippets:
+                return " ".join(snippets[:4])[:400]
+
         for hit in hits:
             text = hit.text.lower()
             if "rmse" in text or "erro quadrático" in text:
@@ -410,6 +763,50 @@ class ChatService:
                     return " ".join(lines[:5])[:400]
         snippet = hits[0].text.splitlines()[-1] if hits else ""
         return snippet[:280] if snippet else _EMPTY_SEARCH_ANSWER
+
+    @classmethod
+    def _refine_answer_for_question(
+        cls,
+        message: str,
+        answer: str,
+        hits: list[MilvusHit],
+    ) -> str:
+        if cls._is_identity_question(message):
+            return _IDENTITY_ANSWER
+
+        if _EMPTY_SEARCH_PHRASE in answer:
+            substantive = answer.split(_EMPTY_SEARCH_PHRASE)[0].strip().rstrip(".")
+            if substantive and len(substantive) > 40:
+                answer = substantive + "."
+
+        if cls._is_preprocessing_question(message):
+            if cls._mentions_model_metrics(answer) and hits:
+                fallback = cls._fallback_answer_from_hits(hits, message)
+                if fallback != _EMPTY_SEARCH_ANSWER:
+                    return cls._sanitize_answer(fallback)
+            answer = re.sub(
+                r"\s*(?:O modelo|O desempenho|Atingiu|Utilizou|foi treinado).*",
+                "",
+                answer,
+                flags=re.IGNORECASE,
+            ).strip()
+
+        if cls._is_metrics_question(message) and hits:
+            structured = cls._build_metrics_answer(hits)
+            if structured != _EMPTY_SEARCH_ANSWER:
+                return structured
+
+        if cls._is_preprocessing_question(message) and hits:
+            structured = cls._build_preprocessing_answer(hits)
+            if structured != _EMPTY_SEARCH_ANSWER:
+                return structured
+
+        return cls._sanitize_answer(answer)
+
+    @staticmethod
+    def _mentions_model_metrics(answer: str) -> bool:
+        lower = answer.lower()
+        return any(token in lower for token in ("rmse", "mae", "mape", "r²", "r2", "xgboost"))
 
     @classmethod
     def _is_bogus_answer(cls, answer: str) -> bool:

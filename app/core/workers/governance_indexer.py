@@ -37,8 +37,17 @@ _DOCS = [
     ("gold",   "dutch-energy/mlflow_report.md",     "mlflow_report"),
 ]
 
-_MAX_CHUNK = 900
+_MAX_CHUNK = 750
+_MAX_TEXT_LEN = 1020  # limite do campo varchar no Milvus
 _MAX_MLFLOW_RUNS = 20
+_MIN_CHUNK_LEN = 80
+
+_SECTION_KEYWORDS = {
+    "limpeza de dados": "Limpeza de dados na camada Silver: duplicatas, consumo inválido, outliers.",
+    "pré-processamento": "Pré-processamento na camada Gold: Target Encoding e StandardScaler.",
+    "feature engineering": "Feature engineering na camada Silver.",
+    "divisão dos dados": "Divisão treino, validação e teste na camada Gold.",
+}
 
 
 class GovernanceIndexer:
@@ -76,7 +85,11 @@ class GovernanceIndexer:
 
             embeddings = self._embedder.embbed_it(chunks)
             data = [
-                {"text": text, "text_vector": embeddings[i].tolist(), "source": sources[i]}
+                {
+                    "text": _cap_text(text),
+                    "text_vector": embeddings[i].tolist(),
+                    "source": sources[i],
+                }
                 for i, text in enumerate(chunks)
             ]
 
@@ -118,7 +131,7 @@ class GovernanceIndexer:
             try:
                 raw = self._storage.get_object(bucket, obj_path)
                 text = raw.read().decode("utf-8")
-                for chunk in _split_markdown(text, _MAX_CHUNK):
+                for chunk in _split_markdown(text, _MAX_CHUNK, source_label):
                     all_chunks.append(chunk)
                     all_sources.append(source_label)
                 logger.info(f"[GOVERNANCE] Lido: {bucket}/{obj_path}")
@@ -151,8 +164,69 @@ def _runs_fingerprint(runs: list[dict]) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
-def _split_markdown(text: str, max_len: int) -> list[str]:
+def _is_low_value_chunk(text: str) -> bool:
+    stripped = text.strip()
+    if len(stripped) < _MIN_CHUNK_LEN:
+        return True
+    if "[Aguardando treinamento" in stripped:
+        return True
+    if re.fullmatch(r"#+ [^\n]+", stripped):
+        return True
+    if re.search(r"processado em:\s*\d{4}", stripped, re.IGNORECASE):
+        body = re.sub(r".*processado em:[^\n-]*", "", stripped, flags=re.IGNORECASE).strip(" -")
+        if len(body) < 50:
+            return True
+    return False
+
+
+def _document_title(text: str) -> str:
+    for line in text.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return ""
+
+
+def _section_title(section: str) -> str:
+    for line in section.splitlines():
+        if re.match(r"#{2,3}\s", line):
+            return re.sub(r"^#+\s*", "", line).strip()
+    return ""
+
+
+def _cap_text(text: str, max_len: int = _MAX_TEXT_LEN) -> str:
+    stripped = text.strip()
+    if len(stripped) <= max_len:
+        return stripped
+    cut = stripped.rfind(" ", 0, max_len)
+    if cut == -1:
+        cut = max_len
+    return stripped[:cut].strip()
+
+
+def _section_keywords(section_title: str) -> str | None:
+    lower = section_title.lower()
+    for key, keywords in _SECTION_KEYWORDS.items():
+        if key in lower:
+            return keywords
+    return None
+
+
+def _enrich_chunk(text: str, source_label: str, doc_title: str, section_title: str) -> str:
+    parts: list[str] = []
+    section_kw = _section_keywords(section_title)
+    if section_kw:
+        parts.append(section_kw)
+    elif source_label == "mlflow_metadata":
+        parts.append("Modelos treinados e métricas MLflow do pipeline Dutch Energy.")
+    if section_title:
+        parts.append(section_title + ".")
+    parts.append(text.strip())
+    return _cap_text("\n".join(parts))
+
+
+def _split_markdown(text: str, max_len: int, source_label: str = "") -> list[str]:
     """Divide markdown por seções (##) e depois por tamanho, preservando contexto semântico."""
+    doc_title = _document_title(text)
     sections: list[str] = []
     current: list[str] = []
     for line in text.splitlines():
@@ -166,7 +240,11 @@ def _split_markdown(text: str, max_len: int) -> list[str]:
 
     chunks: list[str] = []
     for section in sections:
-        chunks.extend(_split(section, max_len))
+        section_title = _section_title(section)
+        for piece in _split(section, max_len):
+            enriched = _enrich_chunk(piece, source_label, doc_title, section_title)
+            if not _is_low_value_chunk(enriched):
+                chunks.append(enriched)
     return chunks
 
 

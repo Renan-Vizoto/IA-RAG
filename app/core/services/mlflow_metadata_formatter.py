@@ -26,8 +26,9 @@ _METRIC_ORDER = (
     "val_rmse", "val_mae", "val_r2", "val_mape",
     "rmse", "mae", "r2", "mape",
     "test_rmse", "test_mae", "test_r2", "test_mape",
-    "train_duration_sec",
 )
+
+_SKIP_SUMMARY_METRICS = frozenset({"train_duration_sec"})
 
 
 def content_hash(run: dict) -> str:
@@ -48,6 +49,43 @@ def pick_best_rmse_run_id(runs: list[dict]) -> str | None:
         return None
     best = min(runs_with_rmse, key=lambda r: _rmse_value(r))
     return best.get("run_id")
+
+
+def format_metrics_summary_chunk(run: dict, is_best: bool = False) -> str:
+    """Chunk agregado com todas as métricas — melhora busca por 'quais métricas'."""
+    metrics = {k.replace("metric_", ""): v for k, v in run.items() if k.startswith("metric_")}
+    if not metrics:
+        return ""
+
+    algorithm = next(
+        (v for k, v in run.items() if k == "param_algorithm"),
+        "XGBoost",
+    )
+    best_note = "Melhor run de treinamento. " if is_best else ""
+    lines = [
+        f"{_HEADER}",
+        f"{best_note}Modelos treinados e métricas utilizadas no pipeline Dutch Energy.",
+        f"Modelo treinado: {algorithm}.",
+        "Métricas de avaliação do treinamento:",
+    ]
+
+    ordered_keys = [k for k in _METRIC_ORDER if k in metrics]
+    ordered_keys.extend(sorted(k for k in metrics if k not in _METRIC_ORDER))
+
+    for metric_key in ordered_keys:
+        if metric_key in _SKIP_SUMMARY_METRICS:
+            continue
+        label = _METRIC_LABELS.get(metric_key, metric_key)
+        lines.append(f"- {label}: {metrics[metric_key]}")
+
+    lines.append(
+        "Quais modelos foram treinados e quais métricas foram utilizadas? "
+        "Resumo de métricas RMSE, MAE, R², MAPE."
+    )
+    text = "\n".join(lines)
+    if len(text) > 1020:
+        text = text[:1017].rsplit(" ", 1)[0].strip()
+    return text
 
 
 def _format_metric_chunk(
@@ -108,10 +146,16 @@ def format_run_chunks(run: dict, is_best: bool = False) -> list[dict]:
 
     sections: list[tuple[str, str]] = [("overview", overview)]
 
+    metrics_summary = format_metrics_summary_chunk(run, is_best=is_best)
+    if metrics_summary:
+        sections.append(("metrics_summary", metrics_summary))
+
     ordered_keys = [k for k in _METRIC_ORDER if k in metrics]
     ordered_keys.extend(sorted(k for k in metrics if k not in _METRIC_ORDER))
 
     for metric_key in ordered_keys:
+        if metric_key in _SKIP_SUMMARY_METRICS:
+            continue
         section = f"metric_{metric_key}"
         text = _format_metric_chunk(run_id, algorithm, metric_key, metrics[metric_key], is_best)
         sections.append((section, text))

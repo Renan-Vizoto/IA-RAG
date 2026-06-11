@@ -160,10 +160,15 @@ class TestSplit:
         assert chunks == [""]
 
     def test_split_markdown_preserva_secao_limpeza(self):
-        chunks = _split_markdown(SILVER_DOC, 900)
+        chunks = _split_markdown(SILVER_DOC, 900, "silver_governance")
         limpeza_chunks = [c for c in chunks if "limpeza" in c.lower()]
         assert limpeza_chunks
-        assert any("### Limpeza de Dados" in c for c in limpeza_chunks)
+        assert any("Limpeza de Dados" in c for c in limpeza_chunks)
+
+    def test_split_markdown_ignora_placeholder_aguardando(self):
+        doc = GOLD_DOC.replace("XGBoost", "[Aguardando treinamento MLflow]")
+        chunks = _split_markdown(doc, 900, "gold_governance")
+        assert not any("[Aguardando treinamento" in c for c in chunks)
 
 
 # ──────────────────────────────────────────────

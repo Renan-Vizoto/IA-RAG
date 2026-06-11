@@ -8,10 +8,10 @@ class SearchService:
         self._repo = repo
         self._embbed = embbeder
 
-    def search(self, text: str) -> str:
+    def search(self, text: str, limit: int | None = None) -> str:
         """Busca semântica na collection governance (docs + metadados MLflow)."""
         vector = self._embbed.embbed_it([text])
-        top_k = settings.RAG_MAX_CONTEXT_CHUNKS
+        top_k = limit or settings.RAG_MAX_CONTEXT_CHUNKS
 
         hits = self._repo.search(
             settings.governance_collection,
