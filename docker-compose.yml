@@ -11,8 +11,8 @@ services:
       MINIO_URL: minio:9000
       MILVUS_URL: http://milvus-standalone:19530
       OLLAMA_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5-0.8b-unsloth}
-      OLLAMA_ALLOWED_MODELS: ${OLLAMA_ALLOWED_MODELS:-qwen3.5-0.8b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5-2b-unsloth}
+      OLLAMA_ALLOWED_MODELS: ${OLLAMA_ALLOWED_MODELS:-qwen3.5-2b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth}
       OLLAMA_TEMPERATURE: ${OLLAMA_TEMPERATURE:-0.2}
       OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-128}
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
@@ -82,7 +82,7 @@ services:
       POSTGRES_PASSWORD: mlflow
       POSTGRES_DB: mlflow
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -188,8 +188,8 @@ services:
     ports:
       - 11435:11434
     environment:
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5-0.8b-unsloth}
-      OLLAMA_ALLOWED_MODELS: ${OLLAMA_ALLOWED_MODELS:-qwen3.5-0.8b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5-2b-unsloth}
+      OLLAMA_ALLOWED_MODELS: ${OLLAMA_ALLOWED_MODELS:-qwen3.5-2b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth}
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
       OLLAMA_WARMUP_ENABLED: ${OLLAMA_WARMUP_ENABLED:-true}
       OLLAMA_WARMUP_TIMEOUT: ${OLLAMA_WARMUP_TIMEOUT:-360}

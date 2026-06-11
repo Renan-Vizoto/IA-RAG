@@ -117,93 +117,10 @@ class ChatResponse(BaseModel):
         description="Number of user messages in this chat thread."
     )
     response_id: str = Field(
-        description="Unique response ID used by the trace endpoint."
+        description="Unique response ID for this assistant turn."
     )
     model: str = Field(description="Resolved Ollama model used for generation.")
     tokens: TokenUsage = Field(description="Token usage for the current turn.")
     chat_tokens: TokenUsage = Field(
         description="Persisted cumulative token usage for this chat."
     )
-
-class MilvusHitTrace(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [
-                {
-                    "milvus_id": "hit-1",
-                    "collection": "mlflow_metadata",
-                    "source": "mlflow_metadata",
-                    "distance": 0.12,
-                    "text_preview": "Modelo XGBoost treinado na camada gold. RMSE: 89.1.",
-                }
-            ]
-        }
-    )
-
-    milvus_id: str | None = Field(default=None, description="Persisted Milvus hit ID.")
-    collection: str = Field(description="Persisted Milvus collection name.")
-    source: str | None = Field(default=None, description="Persisted source label.")
-    distance: float | None = Field(
-        default=None,
-        description="Persisted vector distance for this hit.",
-    )
-    text_preview: str | None = Field(
-        default=None,
-        description="First 500 characters of the retrieved text saved for audit.",
-    )
-
-class ChatTraceResponse(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [
-                {
-                    "response_id": "64682936-5f57-4772-baf8-dd6f546a4c98",
-                    "session_id": "8b2d3ff5-2f4a-4a1e-b23b-4d61b67a61bb",
-                    "chat_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                    "model": "gemma4-unsloth",
-                    "user_message": "Qual modelo foi treinado e qual foi o RMSE?",
-                    "answer": "O modelo treinado foi XGBoost e o RMSE foi 89.1.",
-                    "tokens": {
-                        "input_tokens": 120,
-                        "output_tokens": 48,
-                        "total_tokens": 168,
-                    },
-                    "response_time_seconds": 1.25,
-                    "confidence_score": 0.88,
-                    "milvus_hits": [
-                        {
-                            "milvus_id": "hit-1",
-                            "collection": "mlflow_metadata",
-                            "source": "mlflow_metadata",
-                            "distance": 0.12,
-                            "text_preview": "Modelo XGBoost treinado na camada gold. RMSE: 89.1.",
-                        }
-                    ],
-                    "created_at": "2026-06-08 12:34:56.123456+00:00",
-                }
-            ]
-        }
-    )
-
-    response_id: str = Field(description="Persisted response ID.")
-    session_id: str = Field(description="Session that produced the response.")
-    chat_id: str | None = Field(
-        default=None,
-        description="Chat thread that produced the response.",
-    )
-    model: str = Field(description="Model used for the answer.")
-    user_message: str = Field(description="Original user message.")
-    answer: str = Field(description="Final sanitized answer returned by chat.")
-    tokens: TokenUsage = Field(description="Token usage for this response.")
-    response_time_seconds: float | None = Field(
-        default=None,
-        description="Persisted response time in seconds.",
-    )
-    confidence_score: float | None = Field(
-        default=None,
-        description="Persisted confidence score derived from vector distances.",
-    )
-    milvus_hits: List[MilvusHitTrace] = Field(
-        description="Persisted retrieval hit previews."
-    )
-    created_at: str = Field(description="Persisted creation timestamp as a string.")

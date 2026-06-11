@@ -1,6 +1,7 @@
 services:
   ollama:
-    image: ollama/ollama:rocm
+    # Gemma 4 GGUFs require Ollama >= 0.20.0 (llama.cpp gemma4 arch).
+    image: ollama/ollama:0.20.6-rocm
     devices:
       - /dev/kfd
       - /dev/dri

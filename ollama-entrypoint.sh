@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MODEL="${OLLAMA_MODEL:-qwen3.5-0.8b-unsloth}"
+MODEL="${OLLAMA_MODEL:-qwen3.5-2b-unsloth}"
 OLLAMA_HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
 
 if ! command -v curl >/dev/null 2>&1; then

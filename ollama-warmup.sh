@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MODEL="${1:-${OLLAMA_MODEL:-qwen3.5-0.8b-unsloth}}"
+MODEL="${1:-${OLLAMA_MODEL:-qwen3.5-2b-unsloth}}"
 KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
 OLLAMA_HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
 WARMUP_ENABLED="${OLLAMA_WARMUP_ENABLED:-true}"

@@ -23,9 +23,9 @@ class Settings(BaseSettings):
     chunk_overlap: int = 20
     think: bool = False
     OLLAMA_URL: str = "http://localhost:11435"
-    OLLAMA_MODEL: str = "qwen3.5-0.8b-unsloth"
+    OLLAMA_MODEL: str = "qwen3.5-2b-unsloth"
     OLLAMA_ALLOWED_MODELS: str = (
-        "qwen3.5-0.8b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth"
+        "qwen3.5-2b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth"
     )
     OLLAMA_TEMPERATURE: float = 0.2
     OLLAMA_NUM_PREDICT: int = 1024
@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: str = "minioadmin"
     AWS_SECRET_ACCESS_KEY: str = "minioadmin"
 
-    CHAT_DATABASE_URL: str = "postgresql://mlflow:mlflow@localhost:5432/rag"
+    CHAT_DATABASE_URL: str = "postgresql://mlflow:mlflow@localhost:5434/rag"
 
     @property
     def ollama_allowed_models(self) -> list[str]:

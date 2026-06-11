@@ -21,8 +21,8 @@ case "$1" in
     URL="https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf"
     ;;
   qwen)
-    FILE="$OLLAMA_DIR/Qwen3.5-0.8B-Q4_K_M.gguf"
-    URL="https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf"
+    FILE="$OLLAMA_DIR/Qwen3.5-2B-UD-Q4_K_XL.gguf"
+    URL="https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-UD-Q4_K_XL.gguf"
     ;;
   qwen-9b)
     FILE="$OLLAMA_DIR/Qwen3.5-9B-UD-Q4_K_XL.gguf"

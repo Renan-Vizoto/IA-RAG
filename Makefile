@@ -7,13 +7,13 @@
 #   make up GPU=cpu                  # base compose only (CPU)
 #
 # Inference model:
-#   make up OLLAMA_MODEL=qwen3.5-0.8b-unsloth
+#   make up OLLAMA_MODEL=qwen3.5-2b-unsloth
 
 ROOT           := $(CURDIR)
 VOLUMES        := $(ROOT)/volumes
 OLLAMA_DIR     := $(VOLUMES)/ollama
 EMBEDDING_DIR  := $(VOLUMES)/embeddings/paraphrase-multilingual-MiniLM-L12-v2
-OLLAMA_MODEL   ?= qwen3.5-0.8b-unsloth
+OLLAMA_MODEL   ?= qwen3.5-2b-unsloth
 GPU            ?= auto
 DATA_DIR       ?= notebooks/data
 PIPELINE_FLAGS ?=
@@ -94,7 +94,7 @@ ps: ## Show running containers
 
 setup: setup-embeddings setup-ollama-gemma ## Download embedding + default Ollama GGUF
 
-setup-all: setup setup-ollama-qwen ## Download embedding + gemma + qwen 0.8B
+setup-all: setup setup-ollama-qwen ## Download embedding + gemma + qwen 2B
 
 setup-embeddings: ## Download sentence-transformers model to volumes/embeddings/
 	@bash embedding-setup.sh
@@ -102,7 +102,7 @@ setup-embeddings: ## Download sentence-transformers model to volumes/embeddings/
 setup-ollama-gemma: ## Download gemma-4-E2B-it-Q4_K_M.gguf
 	@bash scripts/download-ollama-gguf.sh gemma
 
-setup-ollama-qwen: ## Download Qwen3.5-0.8B-Q4_K_M.gguf
+setup-ollama-qwen: ## Download Qwen3.5-2B-UD-Q4_K_XL.gguf
 	@bash scripts/download-ollama-gguf.sh qwen
 
 # ---------------------------------------------------------------------------

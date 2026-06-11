@@ -10,7 +10,7 @@ from app.infrastructure.repositories.milvus_repo import MilvusRepo
 from app.infrastructure.repositories.chat_session_repo import ChatSessionRepository
 from app.infrastructure.clients import milvus_client
 from langchain_core.tools import tool
-from app.api.schemas.chat_response import ChatResponse, ChatTraceResponse, TokenUsage, MilvusHitTrace
+from app.api.schemas.chat_response import ChatResponse
 from app.api.schemas.chat import (
     ChatSummary,
     ChatMessage,
@@ -276,50 +276,3 @@ def send_message(
 
     _set_chat_cookie(response, result.chat_id)
     return result
-
-
-@router.get(
-    "/trace/{response_id}",
-    response_model=ChatTraceResponse,
-    summary="Get chat response trace",
-    description=(
-        "Returns persisted observability data for a previous chat response, "
-        "including the original user message, sanitized answer, token usage, "
-        "response latency, confidence score, and retrieved Milvus hit previews."
-    ),
-    responses=build_error_responses(404, 500, 503),
-)
-def get_trace(response_id: str):
-    if not session_repo:
-        raise HTTPException(status_code=503, detail="Repositório de sessão não inicializado")
-
-    data = session_repo.get_response(response_id)
-    if not data:
-        raise HTTPException(status_code=404, detail="Resposta não encontrada")
-
-    return ChatTraceResponse(
-        response_id=data["response_id"],
-        session_id=data["session_id"],
-        chat_id=data.get("chat_id"),
-        model=data["model"],
-        user_message=data["user_message"],
-        answer=data["answer"],
-        tokens=TokenUsage(
-            input_tokens=data.get("input_tokens"),
-            output_tokens=data.get("output_tokens"),
-            total_tokens=data.get("total_tokens"),
-        ),
-        response_time_seconds=data.get("response_time_seconds"),
-        confidence_score=data.get("confidence_score"),
-        milvus_hits=[
-            MilvusHitTrace(
-                milvus_id=h.get("milvus_id"),
-                collection=h.get("collection", "governance"),
-                source=h.get("source"),
-                distance=h.get("distance"),
-                text_preview=h.get("text_preview"),
-            )
-            for h in data.get("milvus_hits", [])
-        ],
-        created_at=str(data.get("created_at", "")),
-    )

@@ -24,16 +24,11 @@ except Exception:  # pragma: no cover - dependency is installed in the API image
 API_DESCRIPTION = """
 Consumer reference for the Dutch Energy RAG API.
 
-The API exposes three main capabilities:
-
-- Agentic RAG chat over Dutch residential energy pipeline knowledge.
-- Direct semantic retrieval against Milvus vector collections.
-- MLflow training metadata for model dashboards and audit screens.
+The API exposes agentic RAG chat over Dutch residential energy pipeline knowledge.
 
 Use `POST /chat/message` for conversational experiences, `POST /chat/chats` and
-`GET /chat/chats` to manage chat threads, `GET /chat/chats/{chat_id}/messages`
-for history, `POST /query` for raw retrieval, and `GET /chat/trace/{response_id}`
-when a UI needs to show evidence and response observability.
+`GET /chat/chats` to manage chat threads, and `GET /chat/chats/{chat_id}/messages`
+for history.
 
 Session behavior: chat uses an `HttpOnly` `session_id` cookie for anonymous
 visitors. If the client does not send one, the API creates it and returns
@@ -52,20 +47,7 @@ OPENAPI_TAGS = [
         "name": "chat",
         "description": (
             "Agentic RAG conversation endpoints. Chat can invoke semantic search, "
-            "returns a `response_id`, tracks token usage, and persists traces."
-        ),
-    },
-    {
-        "name": "query",
-        "description": (
-            "Direct vector retrieval over the governance and MLflow metadata "
-            "Milvus collections. Use this when you need raw evidence snippets."
-        ),
-    },
-    {
-        "name": "metadata",
-        "description": (
-            "MLflow training metadata including run params, metrics, and best-run selection."
+            "returns a `response_id`, and tracks token usage."
         ),
     },
 ]
@@ -177,7 +159,7 @@ def configure_openapi(app: FastAPI) -> None:
         schema = get_openapi(
             title=app.title,
             version=app.version,
-            summary="RAG chat, vector search, and MLflow metadata for Dutch energy analysis.",
+            summary="RAG chat for Dutch energy pipeline analysis.",
             description=API_DESCRIPTION,
             routes=app.routes,
             tags=OPENAPI_TAGS,
@@ -195,7 +177,7 @@ def configure_openapi(app: FastAPI) -> None:
         schema["x-tagGroups"] = [
             {
                 "name": "Core API",
-                "tags": ["chat", "query", "metadata"],
+                "tags": ["chat"],
             },
             {
                 "name": "Operations",

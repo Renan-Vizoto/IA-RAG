@@ -5,13 +5,13 @@ if [ -z "${REGISTER_ONLY:-}" ]; then
   apt-get update && apt-get install -y curl
 fi
 
-GGUF_PATH="/root/.ollama/Qwen3.5-0.8B-Q4_K_M.gguf"
-HF_URL="https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf"
-MODEL_NAME="qwen3.5-0.8b-unsloth"
+GGUF_PATH="/root/.ollama/Qwen3.5-2B-UD-Q4_K_XL.gguf"
+HF_URL="https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-UD-Q4_K_XL.gguf"
+MODEL_NAME="qwen3.5-2b-unsloth"
 MODELFILE="/Modelfile-${MODEL_NAME}"
 
 if [ ! -f "$GGUF_PATH" ]; then
-  echo "Downloading Qwen3.5-0.8B model..."
+  echo "Downloading Qwen3.5-2B model..."
   mkdir -p /root/.ollama
   curl -L -o "$GGUF_PATH" "$HF_URL"
 else
@@ -20,7 +20,7 @@ fi
 
 # Qwen via GGUF precisa de TEMPLATE com tool_call; o renderer nativo não é aplicado ao FROM local.
 cat > "$MODELFILE" << 'EOF'
-FROM /root/.ollama/Qwen3.5-0.8B-Q4_K_M.gguf
+FROM /root/.ollama/Qwen3.5-2B-UD-Q4_K_XL.gguf
 
 PARAMETER stop "<|im_end|>"
 PARAMETER stop "<|endoftext|>"

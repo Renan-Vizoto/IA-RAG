@@ -20,7 +20,7 @@ from app.api.docs import (
     configure_openapi,
     register_docs_routes,
 )
-from app.api.routes import chat, query
+from app.api.routes import chat
 from app.api.schemas.health import HealthResponse
 import logging
 
@@ -92,7 +92,6 @@ app = FastAPI(
 )
 
 app.include_router(chat.router)
-app.include_router(query.router)
 
 
 @app.get(

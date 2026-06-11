@@ -35,8 +35,9 @@ class TestDocsRoutes:
         schema = client.get("/openapi.json").json()
 
         assert "/chat/message" in schema["paths"]
-        assert "/chat/trace/{response_id}" in schema["paths"]
-        assert "/query" in schema["paths"]
-        assert "/metadata" in schema["paths"]
+        assert "/chat/chats" in schema["paths"]
+        assert "/query" not in schema["paths"]
+        assert "/metadata" not in schema["paths"]
+        assert "/chat/trace/{response_id}" not in schema["paths"]
         assert schema["paths"]["/chat/message"]["post"]["description"]
         assert "examples" in schema["components"]["schemas"]["ChatResponse"]

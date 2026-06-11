@@ -116,7 +116,7 @@ cp .env.example .env
 make up
 ```
 
-Na primeira vez, o download dos modelos pode demorar. O Ollama sobe por padrão com **Qwen3.5 0.8B** (`qwen3.5-0.8b-unsloth`).
+Na primeira vez, o download dos modelos pode demorar. O Ollama sobe por padrão com **Qwen3.5 2B** (`qwen3.5-2b-unsloth`).
 
 O container Ollama executa um **warmup automático** do modelo padrão no startup (`ollama-warmup.sh`), absorvendo o cold start (~3 min em GPUs com 4GB VRAM) antes da API ficar disponível. A API só sobe após o Ollama passar no healthcheck.
 
@@ -154,7 +154,7 @@ Atalhos: `make up-nvidia`, `make up-amd`, `make up-cpu`.
 O modelo padrão é configurável via `.env` ou na linha de comando:
 
 ```bash
-make up OLLAMA_MODEL=qwen3.5-0.8b-unsloth
+make up OLLAMA_MODEL=qwen3.5-2b-unsloth
 ```
 
 Na API, é possível escolher outro modelo permitido por requisição:
@@ -184,7 +184,7 @@ make train-force        # reprocessa silver/gold e retreina
 | `make logs` | Acompanha logs dos containers |
 | `make ps` | Status dos containers |
 | `make setup-embeddings` | Baixa apenas o modelo de embedding |
-| `make setup-ollama-qwen` | Baixa apenas o GGUF do Qwen 0.8B |
+| `make setup-ollama-qwen` | Baixa apenas o GGUF do Qwen 2B |
 | `make setup-ollama-gemma` | Baixa apenas o GGUF do Gemma |
 | `make test-unit` | Roda testes unitários |
 | `make clean-volumes` | Remove volumes gerados (destrutivo) |
