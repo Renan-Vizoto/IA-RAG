@@ -12,7 +12,7 @@ services:
       MILVUS_URL: http://milvus-standalone:19530
       OLLAMA_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5-2b-unsloth}
-      OLLAMA_ALLOWED_MODELS: ${OLLAMA_ALLOWED_MODELS:-qwen3.5-2b-unsloth,gemma4-unsloth,qwen3.5-9b-unsloth}
+      OLLAMA_ALLOWED_MODELS: ${OLLAMA_ALLOWED_MODELS:-qwen3.5-2b-unsloth,gemma4-unsloth}
       OLLAMA_TEMPERATURE: ${OLLAMA_TEMPERATURE:-0.2}
       OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-1024}
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}

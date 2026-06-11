@@ -27,7 +27,7 @@ class Settings(BaseSettings):
         "qwen3.5-2b-unsloth,gemma4-unsloth"
     )
     OLLAMA_TEMPERATURE: float = 0.2
-    OLLAMA_NUM_PREDICT: int = 1024
+    OLLAMA_NUM_PREDICT: int = 4096
     OLLAMA_KEEP_ALIVE: str = "30m"
     OLLAMA_WARMUP_ENABLED: bool = True
 
